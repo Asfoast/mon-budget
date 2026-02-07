@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="manifest" href="manifest.json">
+    <title>Mon Budget</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body { font-family: sans-serif; padding: 20px; text-align: center; }
+        input, button { padding: 10px; margin: 5px; border-radius: 5px; border: 1px solid #ccc; }
+        button { background: #2ecc71; color: white; border: none; cursor: pointer; }
+        canvas { max-width: 400px; margin: 20px auto; }
+    </style>
+</head>
+<body>
+    <h1>Mon Budget</h1>
+    <input type="text" id="label" placeholder="Ex: Loyer">
+    <input type="number" id="amount" placeholder="Montant">
+    <button onclick="addExpense()">Ajouter</button>
+    
+    <canvas id="myChart"></canvas>
+
+    <script src="app.js"></script>
+    <script>
+        // Enregistrement du Service Worker pour la PWA
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('sw.js');
+        }
+    </script>
+</body>
+</html>
