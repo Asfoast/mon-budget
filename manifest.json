@@ -1,0 +1,17 @@
+{
+  "name": "Mon Budget Gratuit",
+  "short_name": "Budget",
+  "description": "Application de gestion de budget personnel",
+  "start_url": "index.html",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#2ecc71",
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
