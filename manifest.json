@@ -1,11 +1,11 @@
 {
-  "name": "Mon Budget",
-  "short_name": "Budget",
-  "description": "Suivi de budget personnel",
-  "start_url": "/mon-budget/",
+  "name": "Prism Santé",
+  "short_name": "Santé",
+  "description": "Suivi d'activité et d'alimentation",
+  "start_url": "/prism-sante/",
   "display": "standalone",
-  "background_color": "#0f172a",
-  "theme_color": "#0f172a",
+  "background_color": "#0A2342",
+  "theme_color": "#0A2342",
   "orientation": "portrait",
   "icons": [
     {
