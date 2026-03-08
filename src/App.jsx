@@ -1,17 +1,18 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 
-// ─────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
 // CONSTANTS
-// ─────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
 const INITIAL_CATEGORIES = {
   income:  ["Salaire","Freelance","Investissement","Cadeau","Remboursement","Autre"],
   expense: ["Logement","Alimentation","Transport","Santé","Loisirs","Vêtements","Abonnements","Épargne","Autre"],
 };
 const MONTHS_FR = ["Janvier","Février","Mars","Avril","Mai","Juin","Juillet","Août","Septembre","Octobre","Novembre","Décembre"];
+const PROJECT_EMOJIS = ["🏖️","✈️","🏠","🚗","💻","🎓","💍","🎁","⛺","🛥️","🎸","💪","🌍","🐶","📷"];
 
-// ─────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
 // THEME — Clarté · Marine & Menthe (écosystème Prism)
-// ─────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
 const T = {
   bg:           "#F6F8FA",
   surface:      "#FFFFFF",
@@ -24,19 +25,24 @@ const T = {
   incomeLight:  "#E8F7EF",
   expense:      "#B83232",
   expenseLight: "#FDECEA",
+  project:      "#7C3AED",
+  projectLight: "#EDE9FE",
+  warn:         "#D97706",
+  warnLight:    "#FEF3C7",
   text:         "#0A1929",
   muted:        "#607080",
   border:       "#D8E4EC",
   font:         "'Segoe UI','Helvetica Neue',Helvetica,sans-serif",
 };
 
-// ─────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
 // HELPERS
-// ─────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
 const fmt  = n => new Intl.NumberFormat("fr-FR", { style:"currency", currency:"EUR" }).format(n || 0);
 const fmtD = d => { try { return new Date(d + "T00:00:00").toLocaleDateString("fr-FR"); } catch { return d || ""; } };
 const today = () => new Date().toISOString().split("T")[0];
 const mKey  = (y, m) => `${y}-${String(m + 1).padStart(2, "0")}`;
+const uid   = () => Date.now().toString(36) + Math.random().toString(36).slice(2);
 
 const inPeriod = (item, year, month) => {
   const cur   = year  * 12 + month;
@@ -54,9 +60,16 @@ const periodLabel = item => {
   return `${s} → ${MONTHS_FR[item.endMonth].slice(0, 3)} ${item.endYear}`;
 };
 
-// ─────────────────────────────────────────────────────────────
+// Durée en jours entre aujourd'hui et une date cible
+const daysUntil = dateStr => {
+  const now = new Date(); now.setHours(0,0,0,0);
+  const target = new Date(dateStr + "T00:00:00");
+  return Math.ceil((target - now) / 86400000);
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
 // LOGO PRISM
-// ─────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
 function PrismLogo({ size = 32 }) {
   const r = Math.round(size * 0.28), cx = size / 2;
   const top = size * 0.15, bot = size * 0.82, mid = size * 0.55;
@@ -76,30 +89,227 @@ function PrismLogo({ size = 32 }) {
   );
 }
 
-// ─────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// COMPOSANTS UI
+// ─────────────────────────────────────────────────────────────────────────────
+const Bar = ({ pct, color, h=6 }) => (
+  <div style={{ height:h, borderRadius:4, background:T.border, overflow:"hidden", marginTop:3 }}>
+    <div style={{ width:`${Math.min(pct||0,100)}%`, height:"100%", background:color, borderRadius:4, transition:"width .4s" }}/>
+  </div>
+);
+
+const S = {
+  card: { background:T.surface, borderRadius:14, padding:"13px 16px", margin:"10px 14px",
+          border:`1px solid ${T.border}`, boxShadow:"0 1px 6px rgba(10,35,66,0.05)" },
+  cf:  (m="10px 14px") => ({ background:T.surface, borderRadius:14, padding:"13px 16px",
+          margin:m, border:`1px solid ${T.border}` }),
+  row: { display:"flex", justifyContent:"space-between", alignItems:"center",
+         padding:"9px 0", borderBottom:`1px solid ${T.border}` },
+  rowL:{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"9px 0" },
+  inp: { width:"100%", background:T.bg, border:`1.5px solid ${T.border}`, borderRadius:9,
+         padding:"9px 12px", color:T.text, fontSize:14, fontFamily:T.font,
+         boxSizing:"border-box", marginBottom:9, outline:"none" },
+  sel: { width:"100%", background:T.bg, border:`1.5px solid ${T.border}`, borderRadius:9,
+         padding:"9px 12px", color:T.text, fontSize:14, fontFamily:T.font,
+         boxSizing:"border-box", marginBottom:9, outline:"none" },
+  btn: (bg, fg="#fff") => ({ width:"100%", padding:"11px", background:bg, border:"none",
+         borderRadius:10, color:fg, fontSize:14, fontWeight:700, fontFamily:T.font,
+         cursor:"pointer", marginBottom:7 }),
+  smBtn:(bg, fg="#fff", o=false) => ({ padding:"5px 11px", background:o?"transparent":bg,
+         border:o?`1.5px solid ${bg}`:"none", borderRadius:8, color:o?bg:fg,
+         fontSize:12, fontWeight:600, fontFamily:T.font, cursor:"pointer", flexShrink:0 }),
+  tog: { display:"flex", background:T.bg, border:`1.5px solid ${T.border}`, borderRadius:10,
+         padding:3, marginBottom:10 },
+  tBtn:(a) => ({ flex:1, padding:"7px", border:"none", borderRadius:8, fontFamily:T.font,
+         cursor:"pointer", fontWeight:a?700:400, fontSize:13,
+         background:a?`${T.accent}22`:"transparent", color:a?T.accent:T.muted }),
+  tab: (a) => ({ flex:1, padding:"7px", border:"none", borderRadius:8, fontFamily:T.font,
+         cursor:"pointer", fontWeight:a?700:400, fontSize:13,
+         background:a?T.accent:"transparent", color:a?"#fff":T.muted }),
+  nav: { position:"fixed", bottom:0, left:"50%", transform:"translateX(-50%)", width:"100%",
+         maxWidth:480, background:T.surface, display:"flex", borderTop:`1px solid ${T.border}`,
+         zIndex:100, boxShadow:"0 -2px 12px rgba(10,35,66,0.08)" },
+  navB:(a) => ({ flex:1, padding:"10px 2px 8px", background:"none", border:"none",
+         fontFamily:T.font, color:a?T.accent:T.muted, cursor:"pointer", fontSize:9,
+         display:"flex", flexDirection:"column", alignItems:"center", gap:2,
+         fontWeight:a?700:500, borderTop:a?`2.5px solid ${T.accent}`:"2.5px solid transparent" }),
+  lbl: { fontSize:11, color:T.muted, fontWeight:600, display:"block", marginBottom:3, letterSpacing:.3 },
+  sec: { fontSize:10, color:T.muted, fontWeight:700, letterSpacing:1.5, textTransform:"uppercase" },
+  mSel:{ display:"flex", gap:6, padding:"8px 14px", overflowX:"auto", scrollbarWidth:"none" },
+  mChip:(a) => ({ padding:"5px 12px", borderRadius:20,
+         border:`1px solid ${a?T.accent:T.border}`, background:a?T.accent:T.surface,
+         color:a?"#fff":T.muted, cursor:"pointer", whiteSpace:"nowrap",
+         fontSize:12, fontWeight:a?700:400 }),
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CSV HELPERS
+// ─────────────────────────────────────────────────────────────────────────────
+const exportCSV = (transactions) => {
+  const BOM = "\uFEFF";
+  const hdr = "Date;Type;Catégorie;Description;Montant (€);Récurrent\n";
+  const rows = transactions.map(t => {
+    const d = fmtD(t.date);
+    const type = t.type === "income" ? "Revenu" : "Dépense";
+    const desc = (t.description || "").replace(/;/g, ",");
+    const cat  = (t.category || "").replace(/;/g, ",");
+    const amt  = String(t.amount).replace(".", ",");
+    const rec  = t.isRecurring ? "Oui" : "Non";
+    return `${d};${type};${cat};${desc};${amt};${rec}`;
+  }).join("\n");
+  const blob = new Blob([BOM + hdr + rows], { type:"text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = `prism-finance-${today()}.csv`; a.click();
+  URL.revokeObjectURL(url);
+};
+
+const parseCSV = (text) => {
+  const lines = text.replace(/\r/g, "").split("\n").filter(l => l.trim());
+  if (lines.length < 2) return [];
+  const results = [];
+  for (let i = 1; i < lines.length; i++) {
+    const cols = lines[i].split(/;|,/).map(c => c.trim().replace(/^"|"$/g, ""));
+    if (cols.length < 5) continue;
+    const [rawDate, rawType, cat, desc, rawAmt] = cols;
+    // Date: DD/MM/YYYY ou YYYY-MM-DD
+    let date = today();
+    if (/^\d{2}\/\d{2}\/\d{4}$/.test(rawDate)) {
+      const [d,m,y] = rawDate.split("/");
+      date = `${y}-${m}-${d}`;
+    } else if (/^\d{4}-\d{2}-\d{2}$/.test(rawDate)) {
+      date = rawDate;
+    }
+    const type = rawType.toLowerCase().includes("rev") ? "income" : "expense";
+    const amount = parseFloat(rawAmt.replace(",", ".")) || 0;
+    if (amount <= 0) continue;
+    results.push({ id:uid(), date, type, category:cat||"Autre", description:desc||"", amount, isRecurring:false });
+  }
+  return results;
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MOTEUR DE PROJECTION
+// ─────────────────────────────────────────────────────────────────────────────
+function buildProjection(transactions, recurring, nbMonths = 13) {
+  const now = new Date();
+  const curY = now.getFullYear();
+  const curM = now.getMonth();
+
+  // Moyenne mensuelle des dépenses par catégorie sur les 3–6 derniers mois réels
+  const recentTx = transactions.filter(t => {
+    const d = new Date(t.date + "T00:00:00");
+    const age = (curY - d.getFullYear()) * 12 + (curM - d.getMonth());
+    return age >= 0 && age < 6 && !t.isRecurring;
+  });
+
+  // Regrouper par mois réel pour calculer la moyenne
+  const byMonth = {};
+  recentTx.forEach(t => {
+    const d = new Date(t.date + "T00:00:00");
+    const k = mKey(d.getFullYear(), d.getMonth());
+    if (!byMonth[k]) byMonth[k] = { income:0, expense:{} };
+    if (t.type === "income") {
+      byMonth[k].income += t.amount;
+    } else {
+      byMonth[k].expense[t.category] = (byMonth[k].expense[t.category] || 0) + t.amount;
+    }
+  });
+
+  const monthKeys = Object.keys(byMonth);
+  const nb = monthKeys.length || 1;
+
+  // Moyenne des revenus non-récurrents
+  const avgVarIncome = monthKeys.reduce((s, k) => s + byMonth[k].income, 0) / nb;
+
+  // Moyenne dépenses variables par catégorie
+  const catTotals = {};
+  monthKeys.forEach(k => {
+    Object.entries(byMonth[k].expense).forEach(([cat, amt]) => {
+      catTotals[cat] = (catTotals[cat] || 0) + amt;
+    });
+  });
+  const avgCatExpense = {};
+  Object.entries(catTotals).forEach(([cat, total]) => {
+    avgCatExpense[cat] = total / nb;
+  });
+
+  // Générer les N prochains mois
+  const months = [];
+  let cumulBalance = 0;
+
+  for (let i = 0; i < nbMonths; i++) {
+    let m = curM + i;
+    let y = curY + Math.floor(m / 12);
+    m = m % 12;
+
+    // Récurrents actifs ce mois
+    const activeRecur = recurring.filter(r => inPeriod(r, y, m));
+    const recurIncome  = activeRecur.filter(r => r.type === "income").reduce((s, r) => s + r.amount, 0);
+    const recurExpense = activeRecur.filter(r => r.type === "expense").reduce((s, r) => s + r.amount, 0);
+
+    // Catégories de dépenses récurrentes (pour ne pas les doubler)
+    const recurExpCats = new Set(activeRecur.filter(r => r.type === "expense").map(r => r.category));
+
+    // Dépenses variables (hors catégories déjà couvertes par récurrents)
+    let varExpense = 0;
+    const catBreakdown = {};
+    // Récurrents
+    activeRecur.filter(r => r.type === "expense").forEach(r => {
+      catBreakdown[r.category] = (catBreakdown[r.category] || 0) + r.amount;
+    });
+    // Variables
+    Object.entries(avgCatExpense).forEach(([cat, avg]) => {
+      if (!recurExpCats.has(cat)) {
+        varExpense += avg;
+        catBreakdown[cat] = (catBreakdown[cat] || 0) + avg;
+      }
+    });
+
+    const projIncome  = recurIncome + avgVarIncome;
+    const projExpense = recurExpense + varExpense;
+    const balance     = projIncome - projExpense;
+    cumulBalance     += balance;
+
+    months.push({
+      year: y, month: m,
+      label: `${MONTHS_FR[m].slice(0,3)} ${y}`,
+      income:  projIncome,
+      expense: projExpense,
+      balance,
+      cumulBalance,
+      catBreakdown,
+      isHistory: i === 0, // mois courant
+    });
+  }
+  return { months, avgVarIncome, avgCatExpense };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // MAIN APP
-// ─────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
 export default function PrismFinance() {
 
-  // ── Core state ────────────────────────────────────────────
+  // ── Core state ───────────────────────────────────────────────────────────
   const [transactions,    setTransactions]    = useState([]);
   const [recurring,       setRecurring]       = useState([]);
   const [categories,      setCategories]      = useState(INITIAL_CATEGORIES);
   const [generatedMonths, setGeneratedMonths] = useState([]);
+  const [projects,        setProjects]        = useState([]);
   const [loaded,          setLoaded]          = useState(false);
 
-  // ── UI state ──────────────────────────────────────────────
+  // ── UI state ─────────────────────────────────────────────────────────────
   const [view,        setView]        = useState("dashboard");
   const [manageTab,   setManageTab]   = useState("recurring");
   const [filterMonth, setFilterMonth] = useState(new Date().getMonth());
   const [filterYear,  setFilterYear]  = useState(new Date().getFullYear());
 
-  // ── Transaction form ──────────────────────────────────────
+  // ── Transaction form ─────────────────────────────────────────────────────
   const [form,    setForm]    = useState({ type:"expense", amount:"", description:"", category:"Alimentation", date:today() });
   const [formErr, setFormErr] = useState("");
   const [saveMsg, setSaveMsg] = useState("");
 
-  // ── Recurring form ────────────────────────────────────────
+  // ── Recurring form ────────────────────────────────────────────────────────
   const nowD = new Date();
   const emptyR = {
     name:"", amount:"", category:"Logement", type:"expense", day:"1",
@@ -111,192 +321,175 @@ export default function PrismFinance() {
   const [showRecurF,  setShowRecurF]  = useState(false);
   const [editRecurId, setEditRecurId] = useState(null);
 
-  // ── Category form ─────────────────────────────────────────
+  // ── Category form ─────────────────────────────────────────────────────────
   const [newCatName, setNewCatName] = useState("");
   const [newCatType, setNewCatType] = useState("expense");
   const [editCat,    setEditCat]    = useState(null);
   const [editCatVal, setEditCatVal] = useState("");
 
-  // ── Import ────────────────────────────────────────────────
-  const [importMsg, setImportMsg] = useState(null);
+  // ── Import ────────────────────────────────────────────────────────────────
+  const [importMsg,  setImportMsg]  = useState("");
   const fileRef = useRef(null);
 
-  // ─────────────────────────────────────────────────────────
-  // LOCALSTORAGE — avec migration automatique des anciennes clés
-  // ─────────────────────────────────────────────────────────
+  // ── Projets state ────────────────────────────────────────────────────────
+  const emptyProj = { name:"", emoji:"🏖️", targetAmount:"", deadline:"", savedAmount:"", note:"" };
+  const [projForm,   setProjForm]   = useState(emptyProj);
+  const [showProjF,  setShowProjF]  = useState(false);
+  const [editProjId, setEditProjId] = useState(null);
+  const [projAllocForm, setProjAllocForm] = useState({ id:"", amount:"" });
+
+  // ── Projection UI ────────────────────────────────────────────────────────
+  const [projNbMonths, setProjNbMonths] = useState(13);
+  const [projShowCats, setProjShowCats] = useState(false);
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // LOCALSTORAGE — chargement avec migration des anciennes clés
+  // ─────────────────────────────────────────────────────────────────────────
   useEffect(() => {
     const g = k => { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : null; } catch { return null; } };
 
-    // ── Migration : toutes les versions précédentes → clés actuelles ──
-    // Format : [ancienne clé, nouvelle clé]
-    const migrations = [
-      // v1 : clés budget_*
-      ["budget_transactions",    "prism_tx"],
-      ["budget_recurring",       "prism_recur"],
-      ["budget_categories",      "prism_cats"],
-      ["budget_generated_months","prism_genmonths"],
-      // v2 : clés budget_custom_categories (version intermédiaire)
-      ["budget_custom_categories","prism_cats"],
-    ];
-
+    // Migration : anciennes clés → nouvelles clés prism_*
     if (!localStorage.getItem("prism_finance_migrated_v1")) {
-      migrations.forEach(([oldKey, newKey]) => {
-        const oldData = localStorage.getItem(oldKey);
-        if (oldData && !localStorage.getItem(newKey)) {
-          localStorage.setItem(newKey, oldData);
-        }
-      });
+      const oldTx   = g("budget_transactions");
+      const oldRec  = g("budget_recurring");
+      const oldCat1 = g("budget_categories");
+      const oldCat2 = g("budget_custom_categories");
+      const oldGen  = g("budget_generated_months");
+      if (oldTx)   localStorage.setItem("prism_tx",        JSON.stringify(oldTx));
+      if (oldRec)  localStorage.setItem("prism_recur",     JSON.stringify(oldRec));
+      if (oldCat1) localStorage.setItem("prism_cats",      JSON.stringify(oldCat1));
+      if (oldCat2 && !oldCat1) localStorage.setItem("prism_cats", JSON.stringify(oldCat2));
+      if (oldGen)  localStorage.setItem("prism_genmonths", JSON.stringify(oldGen));
       localStorage.setItem("prism_finance_migrated_v1", "1");
     }
-    // ─────────────────────────────────────────────────────────
 
-    setTransactions(   g("prism_tx")         || []);
+    setTransactions(   g("prism_tx")        || []);
     setRecurring(      g("prism_recur")      || []);
     setCategories(     g("prism_cats")       || INITIAL_CATEGORIES);
     setGeneratedMonths(g("prism_genmonths")  || []);
+    setProjects(       g("prism_projects")   || []); // NOUVEAU — pas de migration (clé inédite)
     setLoaded(true);
   }, []);
 
-  useEffect(() => { if (loaded) localStorage.setItem("prism_tx",        JSON.stringify(transactions));    }, [transactions,    loaded]);
-  useEffect(() => { if (loaded) localStorage.setItem("prism_recur",     JSON.stringify(recurring));       }, [recurring,       loaded]);
-  useEffect(() => { if (loaded) localStorage.setItem("prism_cats",      JSON.stringify(categories));      }, [categories,      loaded]);
-  useEffect(() => { if (loaded) localStorage.setItem("prism_genmonths", JSON.stringify(generatedMonths)); }, [generatedMonths, loaded]);
+  // ─────────────────────────────────────────────────────────────────────────
+  // LOCALSTORAGE — sauvegarde
+  // ─────────────────────────────────────────────────────────────────────────
+  useEffect(() => { if (loaded) localStorage.setItem("prism_tx",       JSON.stringify(transactions));    }, [transactions,    loaded]);
+  useEffect(() => { if (loaded) localStorage.setItem("prism_recur",    JSON.stringify(recurring));       }, [recurring,       loaded]);
+  useEffect(() => { if (loaded) localStorage.setItem("prism_cats",     JSON.stringify(categories));      }, [categories,      loaded]);
+  useEffect(() => { if (loaded) localStorage.setItem("prism_genmonths",JSON.stringify(generatedMonths)); }, [generatedMonths, loaded]);
+  useEffect(() => { if (loaded) localStorage.setItem("prism_projects",  JSON.stringify(projects));       }, [projects,        loaded]);
 
-  // ─────────────────────────────────────────────────────────
-  // AUTO-GENERATE RECURRING TRANSACTIONS
-  // ─────────────────────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────────────────
+  // GÉNÉRATION DES RÉCURRENCES
+  // ─────────────────────────────────────────────────────────────────────────
   useEffect(() => {
     if (!loaded) return;
-    const key = mKey(filterYear, filterMonth);
-    if (generatedMonths.includes(key)) return;
+    const now = new Date();
+    const curY = now.getFullYear(), curM = now.getMonth();
+    // Générer les 2 derniers mois + mois courant
+    for (let delta = -1; delta <= 0; delta++) {
+      let m = curM + delta, y = curY;
+      if (m < 0) { m += 12; y--; }
+      const key = mKey(y, m);
+      if (generatedMonths.includes(key)) continue;
+      const toAdd = recurring
+        .filter(r => inPeriod(r, y, m))
+        .map(r => ({
+          id: `rec_${r.id}_${key}`,
+          date: `${y}-${String(m + 1).padStart(2,"0")}-${String(Math.min(parseInt(r.day)||1, 28)).padStart(2,"0")}`,
+          type: r.type, amount: r.amount, category: r.category,
+          description: r.name, isRecurring: true, recurId: r.id,
+        }))
+        .filter(t => !transactions.some(x => x.id === t.id));
+      if (toAdd.length > 0) setTransactions(prev => [...prev, ...toAdd]);
+      setGeneratedMonths(prev => [...prev, key]);
+    }
+  }, [loaded, recurring]);
 
-    const eligible = recurring.filter(r => inPeriod(r, filterYear, filterMonth));
-    const newTx = eligible.map(item => {
-      const daysInMonth = new Date(filterYear, filterMonth + 1, 0).getDate();
-      const day  = Math.min(Math.max(parseInt(item.day) || 1, 1), daysInMonth);
-      const date = `${filterYear}-${String(filterMonth + 1).padStart(2,"0")}-${String(day).padStart(2,"0")}`;
-      return {
-        id:          Date.now() + Math.random(),
-        type:        item.type,
-        amount:      parseFloat(item.amount) || 0,
-        description: item.name,
-        category:    item.category,
-        date,
-        isRecurring: true,
-        recurringId: item.id,
-      };
+  // ─────────────────────────────────────────────────────────────────────────
+  // DÉRIVÉS
+  // ─────────────────────────────────────────────────────────────────────────
+  const filteredTx = useMemo(() =>
+    transactions.filter(t => {
+      const d = new Date(t.date + "T00:00:00");
+      return d.getFullYear() === filterYear && d.getMonth() === filterMonth;
+    }).sort((a,b) => b.date.localeCompare(a.date)),
+    [transactions, filterMonth, filterYear]);
+
+  const totals = useMemo(() => ({
+    income:  filteredTx.filter(t => t.type === "income").reduce((s,t) => s + t.amount, 0),
+    expense: filteredTx.filter(t => t.type === "expense").reduce((s,t) => s + t.amount, 0),
+  }), [filteredTx]);
+
+  const catStats = useMemo(() => {
+    const m = {};
+    filteredTx.filter(t => t.type === "expense").forEach(t => {
+      m[t.category] = (m[t.category] || 0) + t.amount;
     });
+    return Object.entries(m).sort((a,b) => b[1]-a[1]);
+  }, [filteredTx]);
 
-    if (newTx.length > 0) setTransactions(prev => [...newTx, ...prev]);
-    setGeneratedMonths(prev => [...prev, key]);
-  }, [filterMonth, filterYear, loaded, recurring]);
+  const monthlyEvol = useMemo(() => {
+    const m = {};
+    transactions.forEach(t => {
+      const d = new Date(t.date + "T00:00:00");
+      const k = mKey(d.getFullYear(), d.getMonth());
+      if (!m[k]) m[k] = { income:0, expense:0, label:`${MONTHS_FR[d.getMonth()].slice(0,3)} ${d.getFullYear()}` };
+      m[k][t.type] += t.amount;
+    });
+    return Object.entries(m).sort(([a],[b]) => a.localeCompare(b)).slice(-6).map(([,v]) => v);
+  }, [transactions]);
 
-  // ─────────────────────────────────────────────────────────
-  // DERIVED DATA
-  // ─────────────────────────────────────────────────────────
-  const allCats = useMemo(() => ({
-    income:  categories.income  || INITIAL_CATEGORIES.income,
-    expense: categories.expense || INITIAL_CATEGORIES.expense,
-  }), [categories]);
+  // Projection financière (moteur)
+  const projection = useMemo(() =>
+    loaded ? buildProjection(transactions, recurring, projNbMonths) : null,
+    [transactions, recurring, projNbMonths, loaded]);
 
-  const filtered = useMemo(() =>
-    transactions
-      .filter(t => {
-        const d = new Date(t.date);
-        return d.getMonth() === filterMonth && d.getFullYear() === filterYear;
-      })
-      .sort((a, b) => new Date(b.date) - new Date(a.date)),
-  [transactions, filterMonth, filterYear]);
-
-  const yearTx = useMemo(() =>
-    transactions.filter(t => new Date(t.date).getFullYear() === filterYear),
-  [transactions, filterYear]);
-
-  const mIncome  = useMemo(() => filtered.filter(t => t.type === "income" ).reduce((s, t) => s + t.amount, 0), [filtered]);
-  const mExpense = useMemo(() => filtered.filter(t => t.type === "expense").reduce((s, t) => s + t.amount, 0), [filtered]);
-  const mBalance = mIncome - mExpense;
-  const mSavings = useMemo(() => filtered.filter(t => t.category === "Épargne").reduce((s, t) => s + t.amount, 0), [filtered]);
-
-  const yIncome  = useMemo(() => yearTx.filter(t => t.type === "income" ).reduce((s, t) => s + t.amount, 0), [yearTx]);
-  const yExpense = useMemo(() => yearTx.filter(t => t.type === "expense").reduce((s, t) => s + t.amount, 0), [yearTx]);
-  const yBalance = yIncome - yExpense;
-  const ySavings = useMemo(() => yearTx.filter(t => t.category === "Épargne").reduce((s, t) => s + t.amount, 0), [yearTx]);
-
-  const catMonth = useMemo(() => {
-    const map = {};
-    filtered.filter(t => t.type === "expense").forEach(t => { map[t.category] = (map[t.category] || 0) + t.amount; });
-    return Object.entries(map).sort((a, b) => b[1] - a[1]);
-  }, [filtered]);
-
-  const catYear = useMemo(() => {
-    const map = {};
-    yearTx.filter(t => t.type === "expense").forEach(t => { map[t.category] = (map[t.category] || 0) + t.amount; });
-    return Object.entries(map).sort((a, b) => b[1] - a[1]);
-  }, [yearTx]);
-
-  const monthStats = useMemo(() =>
-    MONTHS_FR.map((name, m) => {
-      const mx  = transactions.filter(t => new Date(t.date).getFullYear() === filterYear && new Date(t.date).getMonth() === m);
-      const inc = mx.filter(t => t.type === "income" ).reduce((s, t) => s + t.amount, 0);
-      const exp = mx.filter(t => t.type === "expense").reduce((s, t) => s + t.amount, 0);
-      return { name, inc, exp, bal: inc - exp };
-    }),
-  [transactions, filterYear]);
-
-  const years = [...new Set([filterYear, ...transactions.map(t => new Date(t.date).getFullYear())])].sort((a, b) => b - a);
-
-  const activeRecur    = useMemo(() => recurring.filter(r => inPeriod(r, filterYear, filterMonth)), [recurring, filterYear, filterMonth]);
-  const recurCostMonth = useMemo(() => activeRecur.filter(r => r.type === "expense").reduce((s, r) => s + (parseFloat(r.amount) || 0), 0), [activeRecur]);
-
-  // ─────────────────────────────────────────────────────────
-  // CRUD — TRANSACTIONS
-  // ─────────────────────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────────────────
+  // TRANSACTIONS CRUD
+  // ─────────────────────────────────────────────────────────────────────────
   const submitTx = () => {
-    const amt = parseFloat(String(form.amount).replace(",", "."));
-    if (!amt || amt <= 0) { setFormErr("Montant invalide."); return; }
-    if (!form.description.trim()) { setFormErr("Description requise."); return; }
-    setTransactions(prev => [{
-      id: Date.now(), type: form.type, amount: amt,
-      description: form.description.trim(), category: form.category, date: form.date,
-    }, ...prev]);
-    setForm({ type:"expense", amount:"", description:"", category: allCats.expense[0] || "Autre", date: today() });
-    setFormErr("");
-    setSaveMsg("✅ Mouvement enregistré !");
-    setTimeout(() => setSaveMsg(""), 2500);
-    setView("dashboard");
+    if (!form.amount || isNaN(parseFloat(form.amount)) || parseFloat(form.amount) <= 0) {
+      setFormErr("Montant invalide."); return;
+    }
+    const tx = {
+      id: uid(), date: form.date, type: form.type,
+      amount: parseFloat(form.amount), description: form.description,
+      category: form.category, isRecurring: false,
+    };
+    setTransactions(prev => [tx, ...prev]);
+    setForm({ type:"expense", amount:"", description:"", category:"Alimentation", date:today() });
+    setFormErr(""); setSaveMsg("✅ Enregistré !");
+    setTimeout(() => setSaveMsg(""), 2000);
   };
 
   const deleteTx = id => {
-    if (window.confirm("Supprimer ce mouvement ?")) setTransactions(prev => prev.filter(t => t.id !== id));
+    const t = transactions.find(x => x.id === id);
+    if (t?.isRecurring && !window.confirm("Supprimer uniquement cette occurrence (les suivantes seront regénérées) ?")) return;
+    setTransactions(prev => prev.filter(x => x.id !== id));
   };
 
-  // ─────────────────────────────────────────────────────────
-  // CRUD — RECURRING
-  // ─────────────────────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────────────────
+  // RÉCURRENCES CRUD
+  // ─────────────────────────────────────────────────────────────────────────
   const submitRecur = () => {
-    const amt = parseFloat(String(recurForm.amount).replace(",", "."));
-    if (!recurForm.name.trim() || !amt || amt <= 0) return;
+    if (!recurForm.name.trim() || !recurForm.amount) return;
     const item = {
-      id:         editRecurId || Date.now(),
-      name:       recurForm.name.trim(),
-      amount:     amt,
-      category:   recurForm.category,
-      type:       recurForm.type,
-      day:        Math.min(Math.max(parseInt(recurForm.day) || 1, 1), 31),
-      startMonth: parseInt(recurForm.startMonth),
-      startYear:  parseInt(recurForm.startYear),
-      endMonth:   recurForm.hasEnd ? parseInt(recurForm.endMonth) : null,
-      endYear:    recurForm.hasEnd ? parseInt(recurForm.endYear)  : null,
+      ...recurForm,
+      id: editRecurId || uid(),
+      amount: parseFloat(recurForm.amount),
+      day: parseInt(recurForm.day) || 1,
+      endYear:  recurForm.hasEnd ? recurForm.endYear : null,
+      endMonth: recurForm.hasEnd ? recurForm.endMonth : null,
     };
     if (editRecurId) {
       setRecurring(prev => prev.map(r => r.id === editRecurId ? item : r));
-      const startKey = mKey(item.startYear, item.startMonth);
-      setGeneratedMonths(prev => prev.filter(k => k < startKey));
-      setTransactions(prev => prev.filter(t => !(t.isRecurring && t.recurringId === editRecurId)));
+      // Supprimer les occurrences générées par cet item pour les regénérer
+      setTransactions(prev => prev.filter(t => t.recurId !== editRecurId));
+      setGeneratedMonths([]);
     } else {
-      setRecurring(prev => [...prev, item]);
-      const startKey = mKey(item.startYear, item.startMonth);
-      setGeneratedMonths(prev => prev.filter(k => k < startKey));
+      setRecurring(prev => [item, ...prev]);
     }
     setRecurForm(emptyR); setShowRecurF(false); setEditRecurId(null);
   };
@@ -304,757 +497,730 @@ export default function PrismFinance() {
   const deleteRecur = id => {
     if (!window.confirm("Supprimer cette récurrence et ses transactions générées ?")) return;
     setRecurring(prev => prev.filter(r => r.id !== id));
-    setTransactions(prev => prev.filter(t => !(t.isRecurring && t.recurringId === id)));
+    setTransactions(prev => prev.filter(t => t.recurId !== id));
+    setGeneratedMonths([]);
   };
 
-  const startEditRecur = item => {
-    setRecurForm({
-      name: item.name, amount: String(item.amount), category: item.category,
-      type: item.type, day: String(item.day),
-      startMonth: item.startMonth, startYear: item.startYear,
-      endMonth:   item.endMonth ?? new Date().getMonth(),
-      endYear:    item.endYear  ?? new Date().getFullYear(),
-      hasEnd:     item.endMonth != null,
-    });
-    setEditRecurId(item.id);
-    setShowRecurF(true);
+  const startEditRecur = r => {
+    setRecurForm({ ...r, hasEnd: r.endYear != null, endMonth: r.endMonth ?? nowD.getMonth(), endYear: r.endYear ?? nowD.getFullYear() });
+    setEditRecurId(r.id); setShowRecurF(true);
   };
 
-  // ─────────────────────────────────────────────────────────
-  // CRUD — CATEGORIES
-  // ─────────────────────────────────────────────────────────
-  const addCat = () => {
+  // ─────────────────────────────────────────────────────────────────────────
+  // CATÉGORIES CRUD
+  // ─────────────────────────────────────────────────────────────────────────
+  const addCategory = () => {
     const name = newCatName.trim();
     if (!name) return;
-    if ((categories[newCatType] || []).includes(name)) { alert("Cette catégorie existe déjà."); return; }
-    setCategories(prev => ({ ...prev, [newCatType]: [...(prev[newCatType] || []), name] }));
+    setCategories(prev => ({ ...prev, [newCatType]: [...prev[newCatType].filter(c=>c!==name), name] }));
     setNewCatName("");
   };
 
-  const startEditCat = (type, idx) => { setEditCat({ type, idx }); setEditCatVal(categories[type][idx]); };
-
-  const saveEditCat = () => {
-    if (!editCat) return;
-    const { type, idx } = editCat;
+  const renameCategory = (type, oldName) => {
     const newName = editCatVal.trim();
-    const oldName = categories[type][idx];
     if (!newName || newName === oldName) { setEditCat(null); return; }
-    if ((categories[type] || []).includes(newName)) { alert("Ce nom existe déjà."); return; }
-    setTransactions(prev => prev.map(t => t.category === oldName ? { ...t, category: newName } : t));
-    setRecurring(prev => prev.map(r => r.category === oldName ? { ...r, category: newName } : r));
-    setCategories(prev => { const a = [...(prev[type] || [])]; a[idx] = newName; return { ...prev, [type]: a }; });
-    setEditCat(null);
+    setCategories(prev => ({ ...prev, [type]: prev[type].map(c => c===oldName ? newName : c) }));
+    setTransactions(prev => prev.map(t => t.category===oldName ? {...t, category:newName} : t));
+    setRecurring(prev => prev.map(r => r.category===oldName ? {...r, category:newName} : r));
+    setEditCat(null); setEditCatVal("");
   };
 
-  const deleteCat = (type, idx) => {
-    const name  = categories[type][idx];
-    const count = transactions.filter(t => t.category === name).length;
-    const msg   = count > 0
-      ? `"${name}" est utilisée dans ${count} mouvement(s). Ils seront réaffectés à "Autre". Continuer ?`
-      : `Supprimer la catégorie "${name}" ?`;
-    if (!window.confirm(msg)) return;
-    if (count > 0) setTransactions(prev => prev.map(t => t.category === name ? { ...t, category: "Autre" } : t));
-    setRecurring(prev => prev.map(r => r.category === name ? { ...r, category: "Autre" } : r));
-    setCategories(prev => ({ ...prev, [type]: (prev[type] || []).filter((_, i) => i !== idx) }));
+  const deleteCategory = (type, name) => {
+    if (!window.confirm(`Supprimer la catégorie "${name}" ?`)) return;
+    setCategories(prev => ({ ...prev, [type]: prev[type].filter(c => c !== name) }));
   };
 
-  const resetCats = () => {
-    if (window.confirm("Réinitialiser toutes les catégories aux valeurs par défaut ?")) setCategories(INITIAL_CATEGORIES);
+  // ─────────────────────────────────────────────────────────────────────────
+  // PROJETS D'ÉPARGNE CRUD
+  // ─────────────────────────────────────────────────────────────────────────
+  const submitProject = () => {
+    if (!projForm.name.trim() || !projForm.targetAmount) return;
+    const item = {
+      ...projForm,
+      id: editProjId || uid(),
+      targetAmount: parseFloat(projForm.targetAmount),
+      savedAmount:  parseFloat(projForm.savedAmount) || 0,
+      createdAt: today(),
+    };
+    if (editProjId) setProjects(prev => prev.map(p => p.id === editProjId ? item : p));
+    else setProjects(prev => [item, ...prev]);
+    setProjForm(emptyProj); setShowProjF(false); setEditProjId(null);
   };
 
-  // ─────────────────────────────────────────────────────────
-  // CSV EXPORT
-  // ─────────────────────────────────────────────────────────
-  const exportCSV = () => {
-    const headers = ["Date", "Type", "Catégorie", "Description", "Montant (€)", "Récurrent"];
-    const rows = [...transactions]
-      .sort((a, b) => new Date(a.date) - new Date(b.date))
-      .map(t => [
-        t.date,
-        t.type === "income" ? "Entrée" : "Sortie",
-        t.category || "",
-        `"${(t.description || "").replace(/"/g, '""')}"`,
-        (t.amount || 0).toFixed(2).replace(".", ","),
-        t.isRecurring ? "Oui" : "Non",
-      ]);
-    const csv  = [headers, ...rows].map(r => r.join(";")).join("\r\n");
-    const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
-    const url  = URL.createObjectURL(blob);
-    const a    = document.createElement("a");
-    a.href = url; a.download = `prism-finance-${filterYear}.csv`; a.click();
-    URL.revokeObjectURL(url);
+  const deleteProject = id => window.confirm("Supprimer ce projet ?") && setProjects(prev => prev.filter(p => p.id !== id));
+
+  const startEditProject = p => { setProjForm({...p, targetAmount:String(p.targetAmount), savedAmount:String(p.savedAmount)}); setEditProjId(p.id); setShowProjF(true); };
+
+  const allocateToProject = () => {
+    const { id, amount } = projAllocForm;
+    const amt = parseFloat(amount);
+    if (!id || !amt || amt <= 0) return;
+    setProjects(prev => prev.map(p => p.id === id ? { ...p, savedAmount: (p.savedAmount||0) + amt } : p));
+    setProjAllocForm({ id:"", amount:"" });
   };
 
-  // ─────────────────────────────────────────────────────────
-  // CSV IMPORT
-  // ─────────────────────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────────────────
+  // IMPORT CSV
+  // ─────────────────────────────────────────────────────────────────────────
   const handleImport = e => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const file = e.target.files[0]; if (!file) return;
     const reader = new FileReader();
     reader.onload = ev => {
-      try {
-        const text  = ev.target.result.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-        const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
-        if (lines.length < 2) { setImportMsg({ error: "Fichier vide ou sans données." }); return; }
-
-        const sep     = (lines[0].match(/;/g) || []).length >= (lines[0].match(/,/g) || []).length ? ";" : ",";
-        const parseRow = row => {
-          const cells = []; let cur = "", inQ = false;
-          for (const ch of row) {
-            if (ch === '"') { inQ = !inQ; }
-            else if (ch === sep && !inQ) { cells.push(cur.trim()); cur = ""; }
-            else cur += ch;
-          }
-          cells.push(cur.trim()); return cells;
-        };
-
-        const headers = parseRow(lines[0]).map(h => h.toLowerCase().replace(/["""]/g, "").trim());
-        const find    = kws => headers.findIndex(h => kws.some(k => h.includes(k)));
-
-        const iDate = find(["date"]);
-        const iType = find(["type"]);
-        const iCat  = find(["catég", "categ", "cat"]);
-        const iDesc = find(["desc", "libell", "label", "intit", "objet"]);
-        const iAmt  = find(["mont", "amount", "somme", "crédit", "credit", "débit", "debit"]);
-
-        if (iAmt === -1) { setImportMsg({ error: "Colonne Montant introuvable. Vérifiez le format." }); return; }
-
-        let imported = 0, skipped = 0;
-        const newTx = [];
-
-        for (let i = 1; i < lines.length; i++) {
-          const cols   = parseRow(lines[i]);
-          if (cols.length < 2) { skipped++; continue; }
-          const rawAmt = (cols[iAmt] || "").replace(/[€$£\s\u00a0\u202f]/g, "").replace(",", ".");
-          const amount = parseFloat(rawAmt);
-          if (isNaN(amount) || amount === 0) { skipped++; continue; }
-
-          let type;
-          if (iType !== -1) {
-            const tv = (cols[iType] || "").toLowerCase();
-            type = tv.includes("entr") || tv.includes("income") || tv.includes("crédit") || tv.includes("credit") ? "income" : "expense";
-          } else {
-            type = amount > 0 ? "income" : "expense";
-          }
-
-          let date = today();
-          if (iDate !== -1) {
-            const raw = (cols[iDate] || "").trim().replace(/"/g, "");
-            const d1  = new Date(raw);
-            if (!isNaN(d1) && raw.length >= 8) {
-              date = d1.toISOString().split("T")[0];
-            } else {
-              const parts = raw.split(/[\/\-\.]/);
-              if (parts.length === 3) {
-                const [a, b, c] = parts.map(p => p.trim());
-                const yr = c.length === 2 ? "20" + c : c;
-                const dd = parseInt(a) > 12 ? `${yr}-${b.padStart(2,"0")}-${a.padStart(2,"0")}` : `${yr}-${a.padStart(2,"0")}-${b.padStart(2,"0")}`;
-                const d2 = new Date(dd);
-                if (!isNaN(d2)) date = d2.toISOString().split("T")[0];
-              }
-            }
-          }
-
-          const description = iDesc !== -1 ? (cols[iDesc] || `Ligne ${i}`).replace(/^["']|["']$/g, "").trim() : `Import ligne ${i}`;
-          const category    = iCat  !== -1 ? (cols[iCat]  || "Autre").replace(/^["']|["']$/g, "").trim()      : "Autre";
-
-          newTx.push({ id: Date.now() + i + Math.random(), type, amount: Math.abs(amount), description, category, date });
-          imported++;
-        }
-
-        if (newTx.length > 0) setTransactions(prev => [...newTx, ...prev]);
-        setImportMsg({ imported, skipped });
-      } catch (err) {
-        setImportMsg({ error: `Erreur : ${err.message}` });
-      }
+      const parsed = parseCSV(ev.target.result);
+      if (!parsed.length) { setImportMsg("❌ Aucune ligne importée."); return; }
+      setTransactions(prev => {
+        const ids = new Set(prev.map(t => t.date + t.amount + t.description));
+        const news = parsed.filter(t => !ids.has(t.date + t.amount + t.description));
+        setImportMsg(`✅ ${news.length} transaction(s) importée(s).`);
+        return [...news, ...prev];
+      });
     };
-    reader.readAsText(file, "UTF-8");
+    reader.readAsText(file, "utf-8");
     e.target.value = "";
   };
 
-  // ─────────────────────────────────────────────────────────
-  // STYLES
-  // ─────────────────────────────────────────────────────────
-  const S = {
-    app:    { minHeight:"100vh", background:T.bg, color:T.text, fontFamily:T.font, maxWidth:480, margin:"0 auto", paddingBottom:72 },
-    header: { background:T.header, padding:"13px 16px", display:"flex", alignItems:"center", justifyContent:"space-between", position:"sticky", top:0, zIndex:200 },
-    card:   { background:T.surface, borderRadius:14, padding:"13px 16px", margin:"10px 14px", border:`1px solid ${T.border}`, boxShadow:"0 1px 6px rgba(10,35,66,0.06)" },
-    cf:     (m = "10px 14px") => ({ background:T.surface, borderRadius:14, padding:"13px 16px", margin:m, border:`1px solid ${T.border}` }),
-    balBox: { background:T.header, borderRadius:16, padding:"18px 16px 16px", margin:"10px 14px" },
-    row:    { display:"flex", justifyContent:"space-between", alignItems:"center", padding:"9px 0", borderBottom:`1px solid ${T.border}` },
-    rowL:   { display:"flex", justifyContent:"space-between", alignItems:"center", padding:"9px 0" },
-    inp:    { width:"100%", background:T.bg, border:`1.5px solid ${T.border}`, borderRadius:9, padding:"10px 12px", color:T.text, fontSize:15, fontFamily:T.font, boxSizing:"border-box", marginBottom:10, outline:"none" },
-    sel:    { width:"100%", background:T.bg, border:`1.5px solid ${T.border}`, borderRadius:9, padding:"10px 12px", color:T.text, fontSize:15, fontFamily:T.font, boxSizing:"border-box", marginBottom:10, outline:"none" },
-    btn:    (bg, fg = "#fff") => ({ width:"100%", padding:"12px", background:bg, border:"none", borderRadius:10, color:fg, fontSize:15, fontWeight:700, fontFamily:T.font, cursor:"pointer", marginBottom:8 }),
-    smBtn:  (bg, fg = "#fff", o = false) => ({ padding:"5px 11px", background:o?"transparent":bg, border:o?`1.5px solid ${bg}`:"none", borderRadius:8, color:o?bg:fg, fontSize:12, fontWeight:600, fontFamily:T.font, cursor:"pointer" }),
-    toggle: { display:"flex", background:T.bg, border:`1.5px solid ${T.border}`, borderRadius:10, padding:3, marginBottom:10 },
-    tBtn:   (a, type) => ({ flex:1, padding:"8px", border:"none", borderRadius:8, fontFamily:T.font, cursor:"pointer", fontWeight:a?700:400, fontSize:14, transition:"all .15s", background:a?(type==="income"?T.incomeLight:T.expenseLight):"transparent", color:a?(type==="income"?T.income:T.expense):T.muted }),
-    tab:    a => ({ flex:1, padding:"8px", border:"none", borderRadius:8, fontFamily:T.font, cursor:"pointer", fontWeight:a?700:400, fontSize:13, background:a?T.accent:"transparent", color:a?"#fff":T.muted }),
-    nav:    { position:"fixed", bottom:0, left:"50%", transform:"translateX(-50%)", width:"100%", maxWidth:480, background:T.surface, display:"flex", borderTop:`1px solid ${T.border}`, zIndex:100, boxShadow:"0 -2px 12px rgba(10,35,66,0.08)" },
-    navBtn: a => ({ flex:1, padding:"10px 2px 8px", background:"none", border:"none", fontFamily:T.font, color:a?T.accent:T.muted, cursor:"pointer", fontSize:9, display:"flex", flexDirection:"column", alignItems:"center", gap:2, fontWeight:a?700:500, borderTop:a?`2.5px solid ${T.accent}`:"2.5px solid transparent" }),
-    label:  { fontSize:12, color:T.muted, fontWeight:600, display:"block", marginBottom:4, letterSpacing:0.3 },
-    mSel:   { display:"flex", gap:6, padding:"8px 14px", overflowX:"auto", scrollbarWidth:"none" },
-    mChip:  a => ({ padding:"5px 13px", borderRadius:20, border:`1px solid ${a?T.accent:T.border}`, background:a?T.accent:T.surface, color:a?"#fff":T.muted, cursor:"pointer", whiteSpace:"nowrap", fontSize:12, fontWeight:a?700:400 }),
-    secTitle: { fontSize:10, color:T.muted, fontWeight:700, letterSpacing:1.5, textTransform:"uppercase" },
-  };
-
-  const Bar = ({ pct, color }) => (
-    <div style={{ height:5, borderRadius:3, background:T.border, overflow:"hidden", marginTop:3 }}>
-      <div style={{ width:`${Math.min(pct||0,100)}%`, height:"100%", background:color, borderRadius:3, transition:"width .3s" }}/>
+  // ─────────────────────────────────────────────────────────────────────────
+  // NAVIGATEUR MOIS
+  // ─────────────────────────────────────────────────────────────────────────
+  const NavMois = () => (
+    <div style={{ display:"flex", alignItems:"center", gap:8, padding:"8px 14px" }}>
+      <button onClick={() => { let m=filterMonth-1, y=filterYear; if(m<0){m=11;y--;} setFilterMonth(m);setFilterYear(y); }}
+        style={{ background:"none", border:`1px solid ${T.border}`, borderRadius:8, padding:"4px 10px", cursor:"pointer", fontSize:14, color:T.muted }}>‹</button>
+      <div style={{ flex:1, textAlign:"center", fontWeight:700, fontSize:15, color:T.primary }}>
+        {MONTHS_FR[filterMonth]} {filterYear}
+      </div>
+      <button onClick={() => { let m=filterMonth+1, y=filterYear; if(m>11){m=0;y++;} setFilterMonth(m);setFilterYear(y); }}
+        style={{ background:"none", border:`1px solid ${T.border}`, borderRadius:8, padding:"4px 10px", cursor:"pointer", fontSize:14, color:T.muted }}>›</button>
     </div>
   );
 
   const Nav = ({ icon, label, target }) => (
-    <button style={S.navBtn(view === target)} onClick={() => setView(target)}>
+    <button style={S.navB(view === target)} onClick={() => setView(target)}>
       <span style={{ fontSize:17, lineHeight:1 }}>{icon}</span>{label}
     </button>
   );
 
-  const MonthSel = () => (
-    <div style={S.mSel}>
-      {MONTHS_FR.map((m, i) => (
-        <button key={i} style={S.mChip(filterMonth === i)} onClick={() => setFilterMonth(i)}>
-          {m.slice(0, 3)}
-        </button>
-      ))}
-    </div>
-  );
-
   if (!loaded) return (
-    <div style={{ ...S.app, display:"flex", alignItems:"center", justifyContent:"center", height:"100vh" }}>
-      <div style={{ textAlign:"center" }}>
-        <PrismLogo size={52}/>
-        <div style={{ marginTop:12, color:T.muted, fontSize:13 }}>Chargement…</div>
-      </div>
+    <div style={{ minHeight:"100vh", background:T.bg, display:"flex", alignItems:"center", justifyContent:"center", fontFamily:T.font }}>
+      <div style={{ textAlign:"center" }}><PrismLogo size={52}/><div style={{ marginTop:12, color:T.muted, fontSize:13 }}>Chargement…</div></div>
     </div>
   );
 
-  // ─────────────────────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────────────────
   // RENDER
-  // ─────────────────────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────────────────
   return (
-    <div style={S.app}>
+    <div style={{ minHeight:"100vh", background:T.bg, color:T.text, fontFamily:T.font, maxWidth:480, margin:"0 auto", paddingBottom:80 }}>
 
       {/* ════ HEADER ════ */}
-      <div style={S.header}>
+      <div style={{ background:T.header, padding:"12px 16px", display:"flex", alignItems:"center", justifyContent:"space-between", position:"sticky", top:0, zIndex:200 }}>
         <div style={{ display:"flex", alignItems:"center", gap:10 }}>
           <PrismLogo size={30}/>
           <div>
-            <div style={{ fontSize:15, fontWeight:800, color:"#fff", letterSpacing:0.2, lineHeight:1.2 }}>Prism</div>
+            <div style={{ fontSize:15, fontWeight:800, color:"#fff", letterSpacing:.2, lineHeight:1.2 }}>Prism</div>
             <div style={{ fontSize:9, color:"rgba(255,255,255,0.35)", letterSpacing:1.5, textTransform:"uppercase" }}>Finance</div>
           </div>
         </div>
-        <div style={{ display:"flex", gap:6, alignItems:"center" }}>
-          <select value={filterYear} onChange={e => setFilterYear(+e.target.value)}
-            style={{ ...S.sel, width:"auto", marginBottom:0, padding:"4px 8px", fontSize:12, background:"rgba(255,255,255,0.10)", border:"1px solid rgba(255,255,255,0.15)", color:"#fff" }}>
-            {years.map(y => <option key={y} value={y} style={{ background:T.header, color:"#fff" }}>{y}</option>)}
-          </select>
-          <button onClick={exportCSV}
-            style={{ background:"rgba(255,255,255,0.10)", border:"1px solid rgba(255,255,255,0.15)", borderRadius:8, padding:"5px 10px", color:"rgba(255,255,255,0.85)", cursor:"pointer", fontSize:11, fontWeight:600 }}>
-            ⬇ CSV
-          </button>
-          <button onClick={() => fileRef.current?.click()}
-            style={{ background:T.accent, border:"none", borderRadius:8, padding:"5px 10px", color:T.header, cursor:"pointer", fontSize:11, fontWeight:700 }}>
-            ⬆ Import
-          </button>
-          <input ref={fileRef} type="file"
-            accept=".csv,.txt,.CSV,text/csv,text/plain,application/csv,application/vnd.ms-excel"
-            onChange={handleImport} style={{ display:"none" }}/>
-        </div>
+        <button onClick={() => setView("add")}
+          style={{ background:T.accent, border:"none", borderRadius:10, padding:"7px 16px", color:"#fff", fontWeight:800, fontSize:14, cursor:"pointer" }}>
+          + Ajouter
+        </button>
       </div>
 
-      {/* ── Banners ── */}
-      {importMsg && (
-        <div style={{ margin:"8px 14px", padding:"10px 14px", borderRadius:10, border:`1px solid ${importMsg.error?T.expense:T.accent}33`, background:importMsg.error?T.expenseLight:T.accentLight, color:importMsg.error?T.expense:T.income, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-          <span style={{ fontSize:13, fontWeight:600 }}>
-            {importMsg.error
-              ? `❌ ${importMsg.error}`
-              : `✅ ${importMsg.imported} mouvement(s) importé(s)${importMsg.skipped > 0 ? ` · ${importMsg.skipped} ligne(s) ignorée(s)` : ""}`}
-          </span>
-          <button onClick={() => setImportMsg(null)} style={{ background:"none", border:"none", color:"inherit", cursor:"pointer", fontSize:18, padding:0, lineHeight:1 }}>×</button>
-        </div>
-      )}
-      {saveMsg && (
-        <div style={{ margin:"8px 14px", padding:"10px 14px", borderRadius:10, background:T.accentLight, color:T.income, fontWeight:600, fontSize:13, border:`1px solid ${T.accent}44` }}>
-          {saveMsg}
-        </div>
-      )}
-
-      {/* ════════════════════════════════════════
-          DASHBOARD
-      ════════════════════════════════════════ */}
+      {/* ════ DASHBOARD ════ */}
       {view === "dashboard" && (<>
-        <MonthSel/>
-
-        {/* Balance principale */}
-        <div style={S.balBox}>
-          <div style={{ ...S.secTitle, color:"rgba(255,255,255,0.4)", marginBottom:4 }}>
-            Solde — {MONTHS_FR[filterMonth]} {filterYear}
-          </div>
-          <div style={{ fontSize:34, fontWeight:800, color:"#fff", letterSpacing:-1, marginBottom:16 }}>
-            {fmt(mBalance)}
-          </div>
-          <div style={{ display:"flex", gap:8 }}>
-            {[
-              { label:"▲ Revenus",  val:mIncome,  color:"#A8F0D8" },
-              { label:"▼ Dépenses", val:mExpense, color:"#FFAAAA" },
-            ].map(({ label, val, color }) => (
-              <div key={label} style={{ flex:1, background:"rgba(255,255,255,0.09)", borderRadius:10, padding:"9px 12px" }}>
-                <div style={{ ...S.secTitle, color:"rgba(255,255,255,0.35)", marginBottom:3 }}>{label}</div>
-                <div style={{ fontSize:15, fontWeight:700, color }}>{fmt(val)}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Épargne */}
-        {(mSavings > 0 || ySavings > 0) && (
-          <div style={{ ...S.card, background:T.accentLight, border:`1px solid ${T.accent}44` }}>
-            <div style={{ ...S.secTitle, color:T.accent, marginBottom:8 }}>🐖 Épargne</div>
-            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-end", marginBottom:mSavings > 0 && mExpense > 0 ? 10 : 0 }}>
-              <div>
-                <div style={{ fontSize:10, color:T.muted, marginBottom:2 }}>Ce mois</div>
-                <div style={{ fontSize:22, fontWeight:800, color:T.income }}>{fmt(mSavings)}</div>
-              </div>
-              <div style={{ textAlign:"right" }}>
-                <div style={{ fontSize:10, color:T.muted, marginBottom:2 }}>Cette année</div>
-                <div style={{ fontSize:22, fontWeight:800, color:T.income }}>{fmt(ySavings)}</div>
-              </div>
-            </div>
-            {mSavings > 0 && mExpense > 0 && (<>
-              <div style={{ display:"flex", justifyContent:"space-between", fontSize:11, color:T.muted, marginBottom:3 }}>
-                <span>Taux d'épargne</span>
-                <span style={{ fontWeight:700, color:T.income }}>{((mSavings / mExpense) * 100).toFixed(1)} %</span>
-              </div>
-              <Bar pct={(mSavings / mExpense) * 100} color={T.income}/>
-            </>)}
-          </div>
-        )}
-
-        {/* Résumé annuel */}
-        <div style={S.card}>
-          <div style={{ ...S.secTitle, marginBottom:12 }}>Résumé annuel {filterYear}</div>
-          <div style={{ display:"flex", justifyContent:"space-between" }}>
-            {[
-              { l:"Revenus",  v:yIncome,  c:T.income  },
-              { l:"Dépenses", v:yExpense, c:T.expense },
-              { l:"Solde",    v:yBalance, c:yBalance >= 0 ? T.income : T.expense },
-            ].map(({ l, v, c }) => (
+        <NavMois/>
+        {/* Bilan */}
+        <div style={{ background:`linear-gradient(135deg,${T.header},#1a4a7a)`, borderRadius:16, padding:"18px 16px", margin:"10px 14px" }}>
+          <div style={{ ...S.sec, color:"rgba(255,255,255,0.4)", marginBottom:14 }}>BILAN — {MONTHS_FR[filterMonth]} {filterYear}</div>
+          <div style={{ display:"flex", justifyContent:"space-around", marginBottom:14 }}>
+            {[["Revenus", totals.income, T.accent],["Dépenses", totals.expense,"#F87C52"],["Balance", totals.income-totals.expense, totals.income-totals.expense>=0?T.accent:"#F87C52"]].map(([l,v,c]) => (
               <div key={l} style={{ textAlign:"center" }}>
-                <div style={{ fontSize:10, color:T.muted, marginBottom:3 }}>{l}</div>
-                <div style={{ fontSize:15, fontWeight:800, color:c }}>{fmt(v)}</div>
+                <div style={{ fontSize:10, color:"rgba(255,255,255,0.45)", marginBottom:4 }}>{l.toUpperCase()}</div>
+                <div style={{ fontSize:18, fontWeight:800, color:c }}>{fmt(v)}</div>
               </div>
             ))}
           </div>
+          {totals.income > 0 && (
+            <div>
+              <div style={{ display:"flex", justifyContent:"space-between", fontSize:10, color:"rgba(255,255,255,0.4)", marginBottom:4 }}>
+                <span>Dépenses / Revenus</span>
+                <span>{Math.round(totals.expense/totals.income*100)}%</span>
+              </div>
+              <Bar pct={totals.income>0?totals.expense/totals.income*100:0} color={totals.expense/totals.income>.9?"#F87C52":T.accent}/>
+            </div>
+          )}
         </div>
 
-        {/* Récurrences actives */}
-        {activeRecur.length > 0 && (
+        {/* Top catégories */}
+        {catStats.length > 0 && (
           <div style={S.card}>
-            <div style={{ ...S.secTitle, marginBottom:10 }}>🔄 Récurrences — {MONTHS_FR[filterMonth]}</div>
-            {activeRecur.map(r => (
-              <div key={r.id} style={S.row}>
-                <div>
-                  <div style={{ fontSize:13, fontWeight:600 }}>{r.name}</div>
-                  <div style={{ fontSize:10, color:T.muted }}>{r.category} · le {r.day} du mois</div>
-                </div>
-                <span style={{ fontWeight:700, color:r.type==="income"?T.income:T.expense, fontSize:13 }}>
-                  {r.type==="income"?"+":"−"}{fmt(r.amount)}
-                </span>
-              </div>
-            ))}
-            <div style={{ display:"flex", justifyContent:"space-between", paddingTop:8, marginTop:2 }}>
-              <span style={{ fontSize:12, color:T.muted, fontWeight:600 }}>Total sorties récurrentes</span>
-              <span style={{ fontWeight:800, color:T.expense, fontSize:13 }}>−{fmt(recurCostMonth)}</span>
-            </div>
-          </div>
-        )}
-
-        {/* Top dépenses */}
-        {catMonth.length > 0 && (
-          <div style={S.card}>
-            <div style={{ ...S.secTitle, marginBottom:10 }}>Top dépenses — {MONTHS_FR[filterMonth]}</div>
-            {catMonth.slice(0, 5).map(([cat, amt]) => (
-              <div key={cat} style={{ marginBottom:9 }}>
+            <div style={{ ...S.sec, marginBottom:10 }}>Top dépenses</div>
+            {catStats.slice(0, 4).map(([cat, amt]) => (
+              <div key={cat} style={{ marginBottom:8 }}>
                 <div style={{ display:"flex", justifyContent:"space-between", fontSize:13, marginBottom:2 }}>
-                  <span>{cat}</span>
-                  <span style={{ fontWeight:700, color:T.expense }}>{fmt(amt)}</span>
+                  <span>{cat}</span><span style={{ fontWeight:700, color:T.expense }}>{fmt(amt)}</span>
                 </div>
-                <Bar pct={mExpense > 0 ? (amt / mExpense) * 100 : 0} color={T.expense}/>
+                <Bar pct={totals.expense>0?amt/totals.expense*100:0} color={T.accent}/>
               </div>
             ))}
           </div>
         )}
 
-        {/* Derniers mouvements */}
-        <div style={{ ...S.secTitle, margin:"14px 14px 0" }}>Derniers mouvements</div>
-        <div style={S.card}>
-          {filtered.length === 0
-            ? <div style={{ color:T.muted, textAlign:"center", padding:"24px 0", fontSize:13 }}>
-                Aucun mouvement ce mois.{" "}
-                <span style={{ color:T.accent, fontWeight:600, cursor:"pointer" }} onClick={() => setView("add")}>
-                  Appuyez sur ＋ pour ajouter
-                </span>
-              </div>
-            : filtered.slice(0, 8).map((t, i, arr) => (
-              <div key={t.id} style={i === arr.slice(0,8).length - 1 ? S.rowL : S.row}>
-                <div style={{ flex:1, minWidth:0 }}>
-                  <div style={{ fontSize:13, fontWeight:600, display:"flex", alignItems:"center", gap:4 }}>
-                    {t.isRecurring && <span style={{ fontSize:11, color:T.accent, flexShrink:0 }}>🔄</span>}
-                    <span style={{ overflow:"hidden", whiteSpace:"nowrap", textOverflow:"ellipsis" }}>{t.description}</span>
-                  </div>
-                  <div style={{ fontSize:11, color:T.muted }}>{fmtD(t.date)} · {t.category}</div>
-                </div>
-                <div style={{ fontWeight:700, color:t.type==="income"?T.income:T.expense, fontSize:14, marginLeft:10, flexShrink:0 }}>
-                  {t.type==="income"?"+":"−"}{fmt(t.amount)}
-                </div>
-              </div>
-            ))
-          }
-          {filtered.length > 8 && (
-            <button onClick={() => setView("history")}
-              style={{ width:"100%", background:"none", border:"none", color:T.accent, cursor:"pointer", padding:"8px 0", fontSize:12, fontWeight:700, marginTop:2 }}>
-              Voir les {filtered.length} mouvements →
-            </button>
-          )}
-        </div>
-      </>)}
-
-      {/* ════════════════════════════════════════
-          AJOUTER
-      ════════════════════════════════════════ */}
-      {view === "add" && (
-        <div style={{ padding:"16px 14px" }}>
-          <div style={{ fontSize:18, fontWeight:800, marginBottom:18, marginTop:4 }}>Nouveau mouvement</div>
-
-          <div style={S.toggle}>
-            <button style={S.tBtn(form.type==="expense","expense")} onClick={() => setForm(f => ({ ...f, type:"expense", category:allCats.expense[0]||"Autre" }))}>⬇ Sortie</button>
-            <button style={S.tBtn(form.type==="income","income")}   onClick={() => setForm(f => ({ ...f, type:"income",  category:allCats.income[0] ||"Autre" }))}>⬆ Entrée</button>
-          </div>
-
-          <label style={S.label}>Date</label>
-          <input type="date" value={form.date} onChange={e => setForm(f => ({ ...f, date:e.target.value }))} style={S.inp}/>
-
-          <label style={S.label}>Montant (€)</label>
-          <input type="number" inputMode="decimal" placeholder="0,00" value={form.amount}
-            onChange={e => setForm(f => ({ ...f, amount:e.target.value }))} style={S.inp} min="0" step="0.01"/>
-
-          <label style={S.label}>Description</label>
-          <input type="text" placeholder="Ex : Courses Leclerc" value={form.description}
-            onChange={e => setForm(f => ({ ...f, description:e.target.value }))}
-            onKeyDown={e => e.key === "Enter" && submitTx()} style={S.inp}/>
-
-          <label style={S.label}>Catégorie</label>
-          <select value={form.category} onChange={e => setForm(f => ({ ...f, category:e.target.value }))} style={S.sel}>
-            {allCats[form.type === "income" ? "income" : "expense"].map(c => <option key={c}>{c}</option>)}
-          </select>
-
-          {formErr && (
-            <div style={{ color:T.expense, fontSize:12, marginBottom:8, fontWeight:600, padding:"6px 10px", background:T.expenseLight, borderRadius:8 }}>
-              {formErr}
+        {/* Projets en cours */}
+        {projects.filter(p => p.savedAmount < p.targetAmount).length > 0 && (
+          <div style={S.card}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
+              <span style={S.sec}>Projets d'épargne</span>
+              <button onClick={() => { setView("manage"); setManageTab("projets"); }} style={{ ...S.smBtn(T.project), fontSize:10 }}>Voir tout</button>
             </div>
-          )}
-
-          <button style={S.btn(form.type==="income" ? T.income : T.primary)} onClick={submitTx}>
-            {form.type==="income" ? "✅ Enregistrer l'entrée" : "✅ Enregistrer la sortie"}
-          </button>
-          <button style={{ ...S.btn(T.surface, T.muted), border:`1px solid ${T.border}` }}
-            onClick={() => { setForm({ type:"expense", amount:"", description:"", category:allCats.expense[0]||"Autre", date:today() }); setFormErr(""); }}>
-            Effacer le formulaire
-          </button>
-        </div>
-      )}
-
-      {/* ════════════════════════════════════════
-          JOURNAL (HISTORIQUE)
-      ════════════════════════════════════════ */}
-      {view === "history" && (<>
-        <MonthSel/>
-
-        <div style={{ ...S.card, padding:"10px 16px" }}>
-          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-            <span style={{ fontSize:14, fontWeight:800 }}>{MONTHS_FR[filterMonth]} {filterYear}</span>
-            <span style={{ fontSize:12, color:T.muted }}>{filtered.length} mouvement(s)</span>
-          </div>
-          <div style={{ display:"flex", gap:12, marginTop:6 }}>
-            <span style={{ fontSize:12, color:T.income,  fontWeight:700 }}>▲ {fmt(mIncome)}</span>
-            <span style={{ fontSize:12, color:T.expense, fontWeight:700 }}>▼ {fmt(mExpense)}</span>
-            <span style={{ fontSize:12, fontWeight:800,  color:mBalance >= 0 ? T.income : T.expense }}>= {fmt(mBalance)}</span>
-          </div>
-        </div>
-
-        <div style={S.card}>
-          {filtered.length === 0
-            ? <div style={{ color:T.muted, textAlign:"center", padding:"24px 0", fontSize:13 }}>Aucun mouvement ce mois.</div>
-            : filtered.map((t, i, arr) => (
-              <div key={t.id} style={i === arr.length - 1 ? S.rowL : S.row}>
-                <div style={{ flex:1, minWidth:0 }}>
-                  <div style={{ fontSize:13, fontWeight:600, display:"flex", alignItems:"center", gap:4 }}>
-                    {t.isRecurring && <span style={{ fontSize:10, color:T.accent, flexShrink:0 }}>🔄</span>}
-                    <span style={{ overflow:"hidden", whiteSpace:"nowrap", textOverflow:"ellipsis" }}>{t.description}</span>
+            {projects.filter(p => p.savedAmount < p.targetAmount).slice(0, 2).map(p => {
+              const pct = p.targetAmount > 0 ? (p.savedAmount / p.targetAmount) * 100 : 0;
+              const days = p.deadline ? daysUntil(p.deadline) : null;
+              return (
+                <div key={p.id} style={{ marginBottom:10 }}>
+                  <div style={{ display:"flex", justifyContent:"space-between", fontSize:13, marginBottom:2 }}>
+                    <span style={{ fontWeight:700 }}>{p.emoji} {p.name}</span>
+                    <span style={{ color:T.project, fontWeight:700 }}>{fmt(p.savedAmount)} / {fmt(p.targetAmount)}</span>
                   </div>
-                  <div style={{ fontSize:11, color:T.muted }}>{fmtD(t.date)} · {t.category}</div>
+                  {days !== null && (
+                    <div style={{ fontSize:10, color:days<30?T.expense:T.muted, marginBottom:3 }}>
+                      {days > 0 ? `⏱ ${days} jour(s) restant(s)` : "⚠️ Échéance dépassée"}
+                    </div>
+                  )}
+                  <Bar pct={pct} color={T.project}/>
+                  <div style={{ fontSize:10, color:T.muted, textAlign:"right", marginTop:2 }}>{pct.toFixed(0)}%</div>
                 </div>
-                <div style={{ textAlign:"right", flexShrink:0, marginLeft:10 }}>
-                  <div style={{ fontWeight:700, color:t.type==="income"?T.income:T.expense, fontSize:14 }}>
-                    {t.type==="income"?"+":"−"}{fmt(t.amount)}
-                  </div>
-                  <button onClick={() => deleteTx(t.id)}
-                    style={{ background:"none", border:"none", color:T.muted, cursor:"pointer", fontSize:12, padding:"2px 0", fontFamily:T.font }}>
-                    🗑
-                  </button>
-                </div>
-              </div>
-            ))
-          }
-        </div>
-      </>)}
-
-      {/* ════════════════════════════════════════
-          STATS
-      ════════════════════════════════════════ */}
-      {view === "stats" && (<>
-        <div style={{ padding:"16px 14px 0", fontSize:18, fontWeight:800 }}>Statistiques {filterYear}</div>
-
-        <div style={S.card}>
-          <div style={{ ...S.secTitle, marginBottom:12 }}>Synthèse {filterYear}</div>
-          <div style={{ display:"flex", justifyContent:"space-between" }}>
-            {[
-              { l:"Revenus",  v:yIncome,  c:T.income  },
-              { l:"Dépenses", v:yExpense, c:T.expense },
-              { l:"Solde",    v:yBalance, c:yBalance >= 0 ? T.income : T.expense },
-              { l:"Épargne",  v:ySavings, c:T.accent  },
-            ].map(({ l, v, c }) => (
-              <div key={l} style={{ textAlign:"center" }}>
-                <div style={{ fontSize:9, color:T.muted, fontWeight:700, letterSpacing:0.8, marginBottom:3 }}>{l.toUpperCase()}</div>
-                <div style={{ fontSize:13, fontWeight:800, color:c }}>{fmt(v)}</div>
-              </div>
-            ))}
+              );
+            })}
           </div>
-        </div>
+        )}
 
         {/* Évolution mensuelle */}
-        <div style={S.card}>
-          <div style={{ ...S.secTitle, marginBottom:12 }}>Évolution mensuelle</div>
-          {monthStats.map((m, i) => (
-            <div key={i} style={{ marginBottom:10 }}>
-              <div style={{ display:"flex", justifyContent:"space-between", fontSize:12, marginBottom:2, alignItems:"center" }}>
-                <span style={{ color:T.muted, width:34, flexShrink:0, fontWeight:500 }}>{m.name.slice(0,3)}</span>
-                <span style={{ color:T.income,  flex:1, textAlign:"center" }}>{m.inc > 0 ? fmt(m.inc) : "—"}</span>
-                <span style={{ color:T.expense, flex:1, textAlign:"center" }}>{m.exp > 0 ? fmt(m.exp) : "—"}</span>
-                <span style={{ color:m.bal >= 0 ? T.income : T.expense, flex:1, textAlign:"right", fontWeight:700 }}>
-                  {m.inc > 0 || m.exp > 0 ? fmt(m.bal) : "—"}
-                </span>
-              </div>
-              {m.exp > 0 && <Bar pct={yExpense > 0 ? (m.exp / yExpense) * 100 : 0} color={T.expense}/>}
-            </div>
-          ))}
-          <div style={{ display:"flex", justifyContent:"space-between", fontSize:9, color:T.muted, fontWeight:700, marginTop:4 }}>
-            <span style={{ width:34 }}/>
-            <span style={{ flex:1, textAlign:"center" }}>REVENUS</span>
-            <span style={{ flex:1, textAlign:"center" }}>DÉPENSES</span>
-            <span style={{ flex:1, textAlign:"right"  }}>SOLDE</span>
-          </div>
-        </div>
-
-        {/* Dépenses par catégorie */}
-        <div style={S.card}>
-          <div style={{ ...S.secTitle, marginBottom:12 }}>Dépenses par catégorie — {filterYear}</div>
-          {catYear.length === 0
-            ? <div style={{ color:T.muted, fontSize:13 }}>Aucune dépense enregistrée.</div>
-            : catYear.map(([cat, amt]) => (
-              <div key={cat} style={{ marginBottom:9 }}>
-                <div style={{ display:"flex", justifyContent:"space-between", fontSize:13, marginBottom:2 }}>
-                  <span>{cat}</span>
-                  <span style={{ fontWeight:700, color:T.expense }}>{fmt(amt)}</span>
+        {monthlyEvol.length > 1 && (
+          <div style={S.card}>
+            <div style={{ ...S.sec, marginBottom:10 }}>Évolution (6 mois)</div>
+            {monthlyEvol.map((m, i) => (
+              <div key={i} style={{ marginBottom:8 }}>
+                <div style={{ display:"flex", justifyContent:"space-between", fontSize:11, marginBottom:2 }}>
+                  <span style={{ color:T.muted }}>{m.label}</span>
+                  <span style={{ fontWeight:700, color: m.income-m.expense>=0?T.income:T.expense }}>{fmt(m.income-m.expense)}</span>
                 </div>
-                <Bar pct={yExpense > 0 ? (amt / yExpense) * 100 : 0} color={T.expense}/>
+                <div style={{ display:"flex", gap:4, height:5, borderRadius:3, overflow:"hidden" }}>
+                  <div style={{ flex:m.income||0, background:T.income, borderRadius:3 }}/>
+                  <div style={{ flex:m.expense||0, background:T.expense, borderRadius:3 }}/>
+                </div>
               </div>
-            ))
-          }
-        </div>
+            ))}
+          </div>
+        )}
+
+        {filteredTx.length === 0 && (
+          <div style={{ ...S.card, textAlign:"center", color:T.muted, padding:"28px 16px", fontSize:13 }}>
+            Aucune transaction ce mois.<br/>Appuyez sur <strong>+ Ajouter</strong> pour commencer.
+          </div>
+        )}
       </>)}
 
-      {/* ════════════════════════════════════════
-          GÉRER
-      ════════════════════════════════════════ */}
-      {view === "manage" && (
-        <div style={{ padding:"16px 14px" }}>
-          <div style={{ fontSize:18, fontWeight:800, marginBottom:16, marginTop:4 }}>Gérer</div>
+      {/* ════ TRANSACTIONS ════ */}
+      {view === "transactions" && (<>
+        <NavMois/>
+        <div style={{ padding:"0 14px 6px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+          <span style={S.sec}>{filteredTx.length} mouvement(s)</span>
+          <button onClick={() => exportCSV(transactions)} style={S.smBtn(T.primary)}>⬇ CSV</button>
+        </div>
+        {filteredTx.length === 0
+          ? <div style={{ ...S.card, textAlign:"center", color:T.muted, padding:"28px 16px", fontSize:13 }}>Aucune transaction ce mois.</div>
+          : filteredTx.map((t, i, arr) => (
+            <div key={t.id} style={{ ...S.card, padding:"10px 14px" }}>
+              <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+                <div style={{ width:36, height:36, borderRadius:10, background: t.type==="income"?T.incomeLight:T.expenseLight,
+                  display:"flex", alignItems:"center", justifyContent:"center", fontSize:16, flexShrink:0 }}>
+                  {t.type==="income" ? "↑" : "↓"}
+                </div>
+                <div style={{ flex:1, minWidth:0 }}>
+                  <div style={{ fontSize:13, fontWeight:600, overflow:"hidden", whiteSpace:"nowrap", textOverflow:"ellipsis" }}>
+                    {t.description || t.category}
+                  </div>
+                  <div style={{ fontSize:10, color:T.muted }}>
+                    {fmtD(t.date)} · {t.category}{t.isRecurring ? " · 🔁" : ""}
+                  </div>
+                </div>
+                <div style={{ textAlign:"right", flexShrink:0 }}>
+                  <div style={{ fontSize:14, fontWeight:700, color:t.type==="income"?T.income:T.expense }}>
+                    {t.type==="income"?"+":"-"}{fmt(t.amount)}
+                  </div>
+                  <button onClick={() => deleteTx(t.id)} style={{ background:"none", border:"none", color:T.muted, cursor:"pointer", fontSize:12, padding:0 }}>🗑</button>
+                </div>
+              </div>
+            </div>
+          ))
+        }
+      </>)}
 
-          <div style={{ ...S.toggle, marginBottom:16 }}>
-            <button style={S.tab(manageTab==="recurring")}  onClick={() => setManageTab("recurring")}>🔄 Récurrences</button>
-            <button style={S.tab(manageTab==="categories")} onClick={() => setManageTab("categories")}>🏷 Catégories</button>
+      {/* ════ AJOUTER ════ */}
+      {view === "add" && (
+        <div style={{ padding:"16px 14px" }}>
+          <div style={{ fontSize:18, fontWeight:800, marginBottom:14, marginTop:4 }}>Nouvelle transaction</div>
+          {/* Type toggle */}
+          <div style={{ ...S.tog, marginBottom:12 }}>
+            <button style={S.tab(form.type==="expense")} onClick={() => setForm(f=>({...f,type:"expense",category:"Alimentation"}))}>💸 Dépense</button>
+            <button style={S.tab(form.type==="income")}  onClick={() => setForm(f=>({...f,type:"income",category:"Salaire"}))}>💰 Revenu</button>
+          </div>
+          <label style={S.lbl}>Date</label>
+          <input type="date" value={form.date} onChange={e=>setForm(f=>({...f,date:e.target.value}))} style={S.inp}/>
+          <label style={S.lbl}>Montant (€)</label>
+          <input type="number" min="0" step="0.01" placeholder="0,00" value={form.amount} onChange={e=>setForm(f=>({...f,amount:e.target.value}))} style={S.inp}/>
+          <label style={S.lbl}>Catégorie</label>
+          <select value={form.category} onChange={e=>setForm(f=>({...f,category:e.target.value}))} style={S.sel}>
+            {(categories[form.type]||[]).map(c => <option key={c}>{c}</option>)}
+          </select>
+          <label style={S.lbl}>Description (optionnel)</label>
+          <input placeholder="Ex : Courses Carrefour" value={form.description} onChange={e=>setForm(f=>({...f,description:e.target.value}))} style={S.inp}/>
+          {formErr && <div style={{ color:T.expense, fontSize:12, marginBottom:8, padding:"6px 10px", background:T.expenseLight, borderRadius:8 }}>{formErr}</div>}
+          {saveMsg && <div style={{ color:T.income, fontSize:12, marginBottom:8, padding:"6px 10px", background:T.incomeLight, borderRadius:8 }}>{saveMsg}</div>}
+          <button style={S.btn(T.accent)} onClick={submitTx}>✅ Enregistrer</button>
+        </div>
+      )}
+
+      {/* ════ PROJECTION ════ */}
+      {view === "projection" && projection && (<>
+        <div style={{ padding:"16px 14px 8px" }}>
+          <div style={{ fontSize:18, fontWeight:800, marginBottom:4 }}>📈 Projection financière</div>
+          <div style={{ fontSize:12, color:T.muted, marginBottom:12, lineHeight:1.5 }}>
+            Basée sur vos récurrences actives + la moyenne mensuelle des 6 derniers mois.
+            Objectif : vision tendancielle, non précise au jour.
           </div>
 
-          {/* ────── RÉCURRENCES ────── */}
-          {manageTab === "recurring" && (<>
-            <button onClick={() => { setShowRecurF(!showRecurF); setEditRecurId(null); setRecurForm(emptyR); }}
-              style={S.btn(showRecurF ? T.muted : T.primary)}>
-              {showRecurF ? "✕ Annuler" : "＋ Nouvelle récurrence"}
+          {/* Horizon */}
+          <div style={{ display:"flex", gap:6, marginBottom:12 }}>
+            {[7, 13, 25].map(n => (
+              <button key={n} onClick={() => setProjNbMonths(n)}
+                style={{ flex:1, padding:"7px 4px", borderRadius:8, border:`1px solid ${projNbMonths===n?T.accent:T.border}`,
+                  background:projNbMonths===n?T.accentLight:T.bg, color:projNbMonths===n?T.accent:T.muted,
+                  fontSize:12, fontWeight:projNbMonths===n?700:400, cursor:"pointer", fontFamily:T.font }}>
+                {n===7?"6 mois":n===13?"12 mois":"24 mois"}
+              </button>
+            ))}
+          </div>
+
+          {/* Résumé moteur */}
+          <div style={{ ...S.cf("0 0 12px"), background:T.accentLight, border:`1px solid ${T.accent}33` }}>
+            <div style={{ ...S.sec, marginBottom:8, color:T.accentDark }}>Hypothèses</div>
+            <div style={{ fontSize:12, color:T.text, display:"flex", flexDirection:"column", gap:5 }}>
+              <div style={{ display:"flex", justifyContent:"space-between" }}>
+                <span>Revenu mensuel estimé</span>
+                <strong>{fmt(projection.months[0]?.income || 0)}</strong>
+              </div>
+              <div style={{ display:"flex", justifyContent:"space-between" }}>
+                <span>Dépenses estimées</span>
+                <strong style={{ color:T.expense }}>{fmt(projection.months[0]?.expense || 0)}</strong>
+              </div>
+              <div style={{ display:"flex", justifyContent:"space-between" }}>
+                <span>Balance mensuelle</span>
+                <strong style={{ color:projection.months[0]?.balance >= 0 ? T.income : T.expense }}>
+                  {fmt(projection.months[0]?.balance || 0)}
+                </strong>
+              </div>
+            </div>
+            <button onClick={() => setProjShowCats(!projShowCats)}
+              style={{ background:"none", border:"none", color:T.accentDark, fontSize:11, cursor:"pointer", padding:"4px 0 0", fontFamily:T.font }}>
+              {projShowCats?"▾ Masquer":"▸ Détail par catégorie"}
             </button>
+            {projShowCats && (
+              <div style={{ marginTop:8 }}>
+                {Object.entries(projection.months[0]?.catBreakdown || {}).sort((a,b)=>b[1]-a[1]).map(([cat,amt]) => (
+                  <div key={cat} style={{ display:"flex", justifyContent:"space-between", fontSize:11, padding:"3px 0", borderBottom:`1px solid ${T.border}` }}>
+                    <span style={{ color:T.muted }}>{cat}</span>
+                    <span style={{ fontWeight:600 }}>{fmt(amt)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
 
+        {/* Tableau mois par mois */}
+        <div style={{ padding:"0 14px 10px" }}>
+          <div style={{ ...S.sec, marginBottom:8 }}>Mois par mois</div>
+          {projection.months.map((m, i) => (
+            <div key={i} style={{ ...S.cf("0 0 8px"), border:`1px solid ${m.balance >= 0 ? T.border : T.expenseLight}`,
+              background: i === 0 ? `${T.accent}10` : T.surface }}>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6 }}>
+                <div>
+                  <span style={{ fontSize:13, fontWeight:800, color:T.primary }}>{m.label}</span>
+                  {i === 0 && <span style={{ fontSize:10, color:T.accent, marginLeft:6, fontWeight:700 }}>Mois courant</span>}
+                </div>
+                <div style={{ textAlign:"right" }}>
+                  <div style={{ fontSize:14, fontWeight:800, color: m.balance >= 0 ? T.income : T.expense }}>
+                    {m.balance >= 0 ? "+" : ""}{fmt(m.balance)}
+                  </div>
+                  <div style={{ fontSize:10, color:T.muted }}>Cumul : {fmt(m.cumulBalance)}</div>
+                </div>
+              </div>
+              <div style={{ display:"flex", gap:8 }}>
+                <div style={{ flex:1, textAlign:"center", background:T.incomeLight, borderRadius:8, padding:"5px 4px" }}>
+                  <div style={{ fontSize:9, color:T.income, fontWeight:700 }}>REVENUS</div>
+                  <div style={{ fontSize:12, fontWeight:800, color:T.income }}>{fmt(m.income)}</div>
+                </div>
+                <div style={{ flex:1, textAlign:"center", background:T.expenseLight, borderRadius:8, padding:"5px 4px" }}>
+                  <div style={{ fontSize:9, color:T.expense, fontWeight:700 }}>DÉPENSES</div>
+                  <div style={{ fontSize:12, fontWeight:800, color:T.expense }}>{fmt(m.expense)}</div>
+                </div>
+              </div>
+
+              {/* Projets qui pourraient être financés ce mois */}
+              {projects.filter(p => p.savedAmount < p.targetAmount).map(p => {
+                const needed = p.targetAmount - p.savedAmount;
+                // Épargne cumulée disponible jusqu'à ce mois (balance positive cumulée)
+                const savable = projection.months.slice(0, i+1).reduce((s, mm) => s + Math.max(mm.balance, 0), 0);
+                const canFund = savable >= needed;
+                const isMilestone = canFund && (i === 0 || projection.months.slice(0, i).reduce((s,mm)=>s+Math.max(mm.balance,0),0) < needed);
+                if (!isMilestone) return null;
+                return (
+                  <div key={p.id} style={{ marginTop:6, background:T.projectLight, borderRadius:8, padding:"6px 10px", fontSize:11, color:T.project, fontWeight:700 }}>
+                    🎯 {p.emoji} {p.name} financé ({fmt(p.targetAmount)})
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+
+        {/* Projets & timeline */}
+        {projects.length > 0 && (
+          <div style={{ padding:"0 14px 10px" }}>
+            <div style={{ ...S.sec, marginBottom:8, color:T.project }}>Objectifs d'épargne</div>
+            {projects.map(p => {
+              const needed = p.targetAmount - p.savedAmount;
+              // Mois où le projet sera financé via la projection
+              let fundMonth = null;
+              let cumSave = 0;
+              for (let i = 0; i < projection.months.length; i++) {
+                cumSave += Math.max(projection.months[i].balance, 0);
+                if (cumSave >= needed) { fundMonth = projection.months[i]; break; }
+              }
+              const pct = p.targetAmount > 0 ? Math.min((p.savedAmount / p.targetAmount) * 100, 100) : 0;
+              const days = p.deadline ? daysUntil(p.deadline) : null;
+              return (
+                <div key={p.id} style={{ ...S.cf("0 0 8px"), border:`1px solid ${T.project}44` }}>
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6 }}>
+                    <div style={{ fontSize:14, fontWeight:800 }}>{p.emoji} {p.name}</div>
+                    <div style={{ fontSize:13, fontWeight:700, color:T.project }}>{fmt(p.savedAmount)} / {fmt(p.targetAmount)}</div>
+                  </div>
+                  {p.note && <div style={{ fontSize:11, color:T.muted, fontStyle:"italic", marginBottom:6 }}>{p.note}</div>}
+                  <Bar pct={pct} color={T.project} h={7}/>
+                  <div style={{ display:"flex", justifyContent:"space-between", marginTop:5, fontSize:10 }}>
+                    <span style={{ color:T.muted }}>{pct.toFixed(0)}%</span>
+                    {days !== null && <span style={{ color:days<30?T.expense:T.muted }}>Échéance : {fmtD(p.deadline)}</span>}
+                  </div>
+                  {fundMonth && p.savedAmount < p.targetAmount && (
+                    <div style={{ marginTop:8, background:T.projectLight, borderRadius:8, padding:"6px 10px", fontSize:11, color:T.project }}>
+                      📅 Finançable en <strong>{fundMonth.label}</strong> selon la projection
+                    </div>
+                  )}
+                  {p.savedAmount >= p.targetAmount && (
+                    <div style={{ marginTop:8, background:T.incomeLight, borderRadius:8, padding:"6px 10px", fontSize:11, color:T.income, fontWeight:700 }}>
+                      🎉 Objectif atteint !
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </>)}
+
+      {/* ════ GÉRER ════ */}
+      {view === "manage" && (
+        <div style={{ padding:"16px 14px" }}>
+          <div style={{ fontSize:18, fontWeight:800, marginBottom:14, marginTop:4 }}>Gérer</div>
+          <div style={{ display:"flex", gap:4, overflowX:"auto", marginBottom:14, scrollbarWidth:"none" }}>
+            {[["recurring","🔁 Récurrences"],["categories","🏷 Catégories"],["projets","🎯 Projets"],["import","📥 Import"]].map(([k,l]) => (
+              <button key={k} onClick={() => setManageTab(k)}
+                style={{ padding:"7px 12px", borderRadius:20, border:`1px solid ${manageTab===k?T.accent:T.border}`,
+                  background:manageTab===k?T.accent:T.bg, color:manageTab===k?"#fff":T.muted,
+                  fontSize:12, fontWeight:manageTab===k?700:400, cursor:"pointer", whiteSpace:"nowrap", fontFamily:T.font, flexShrink:0 }}>
+                {l}
+              </button>
+            ))}
+          </div>
+
+          {/* ─── RÉCURRENCES ─── */}
+          {manageTab === "recurring" && (<>
+            <button onClick={() => { setRecurForm(emptyR); setEditRecurId(null); setShowRecurF(!showRecurF); }}
+              style={S.btn(showRecurF?T.muted:T.primary)}>
+              {showRecurF?"✕ Annuler":"+ Nouvelle récurrence"}
+            </button>
             {showRecurF && (
-              <div style={{ ...S.cf("0 0 14px"), border:`1.5px solid ${T.accent}`, boxShadow:`0 0 0 3px ${T.accentLight}` }}>
-                <div style={{ fontSize:14, fontWeight:800, marginBottom:12 }}>
-                  {editRecurId ? "Modifier la récurrence" : "Nouvelle récurrence"}
-                </div>
-
-                <div style={S.toggle}>
-                  <button style={S.tBtn(recurForm.type==="expense","expense")} onClick={() => setRecurForm(f => ({ ...f, type:"expense", category:"Logement" }))}>⬇ Sortie</button>
-                  <button style={S.tBtn(recurForm.type==="income","income")}   onClick={() => setRecurForm(f => ({ ...f, type:"income",  category:"Salaire"  }))}>⬆ Entrée</button>
-                </div>
-
-                <label style={S.label}>Nom</label>
-                <input placeholder="Ex : Loyer, Netflix, EDF…" value={recurForm.name}
-                  onChange={e => setRecurForm(f => ({ ...f, name:e.target.value }))} style={S.inp}/>
-
-                <label style={S.label}>Montant (€)</label>
-                <input type="number" inputMode="decimal" placeholder="0,00" value={recurForm.amount}
-                  onChange={e => setRecurForm(f => ({ ...f, amount:e.target.value }))} style={S.inp} min="0" step="0.01"/>
-
-                <label style={S.label}>Catégorie</label>
-                <select value={recurForm.category} onChange={e => setRecurForm(f => ({ ...f, category:e.target.value }))} style={S.sel}>
-                  {allCats[recurForm.type === "income" ? "income" : "expense"].map(c => <option key={c}>{c}</option>)}
-                </select>
-
-                <label style={S.label}>Jour du mois (1 – 31)</label>
-                <input type="number" min="1" max="31" value={recurForm.day}
-                  onChange={e => setRecurForm(f => ({ ...f, day:e.target.value }))} style={S.inp}/>
-
-                {/* Début */}
-                <label style={S.label}>Mois de début</label>
-                <div style={{ display:"flex", gap:8, marginBottom:10 }}>
-                  <select value={recurForm.startMonth} onChange={e => setRecurForm(f => ({ ...f, startMonth:+e.target.value }))}
-                    style={{ ...S.sel, marginBottom:0, flex:2 }}>
-                    {MONTHS_FR.map((m, i) => <option key={i} value={i}>{m}</option>)}
-                  </select>
-                  <input type="number" placeholder="2025" value={recurForm.startYear}
-                    onChange={e => setRecurForm(f => ({ ...f, startYear:+e.target.value }))}
-                    style={{ ...S.inp, marginBottom:0, flex:1 }} min="2000" max="2099"/>
-                </div>
-
-                {/* Fin optionnelle */}
-                <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:10 }}>
-                  <input type="checkbox" id="hasEnd" checked={recurForm.hasEnd}
-                    onChange={e => setRecurForm(f => ({ ...f, hasEnd:e.target.checked }))}
-                    style={{ width:16, height:16, accentColor:T.accent, cursor:"pointer" }}/>
-                  <label htmlFor="hasEnd" style={{ fontSize:13, color:T.text, cursor:"pointer", fontWeight:500 }}>
-                    Définir une date de fin
-                  </label>
-                </div>
-
-                {recurForm.hasEnd && (<>
-                  <label style={S.label}>Mois de fin</label>
-                  <div style={{ display:"flex", gap:8, marginBottom:10 }}>
-                    <select value={recurForm.endMonth ?? 0} onChange={e => setRecurForm(f => ({ ...f, endMonth:+e.target.value }))}
-                      style={{ ...S.sel, marginBottom:0, flex:2 }}>
-                      {MONTHS_FR.map((m, i) => <option key={i} value={i}>{m}</option>)}
+              <div style={{ ...S.cf("0 0 12px"), border:`1.5px solid ${T.accent}` }}>
+                <div style={{ fontSize:13, fontWeight:800, marginBottom:12 }}>{editRecurId?"Modifier":"Nouvelle récurrence"}</div>
+                <div style={{ display:"flex", gap:8 }}>
+                  <div style={{ flex:1 }}>
+                    <label style={S.lbl}>Type</label>
+                    <select value={recurForm.type} onChange={e=>setRecurForm(f=>({...f,type:e.target.value,category:e.target.value==="income"?"Salaire":"Logement"}))} style={S.sel}>
+                      <option value="expense">Dépense</option><option value="income">Revenu</option>
                     </select>
-                    <input type="number" placeholder="2025" value={recurForm.endYear ?? new Date().getFullYear()}
-                      onChange={e => setRecurForm(f => ({ ...f, endYear:+e.target.value }))}
-                      style={{ ...S.inp, marginBottom:0, flex:1 }} min="2000" max="2099"/>
+                  </div>
+                  <div style={{ flex:2 }}>
+                    <label style={S.lbl}>Nom</label>
+                    <input placeholder="Ex : Loyer" value={recurForm.name} onChange={e=>setRecurForm(f=>({...f,name:e.target.value}))} style={S.inp}/>
+                  </div>
+                </div>
+                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
+                  <div><label style={S.lbl}>Montant (€)</label><input type="number" min="0" step="0.01" value={recurForm.amount} onChange={e=>setRecurForm(f=>({...f,amount:e.target.value}))} style={{ ...S.inp, marginBottom:0 }}/></div>
+                  <div><label style={S.lbl}>Jour du mois</label><input type="number" min="1" max="28" value={recurForm.day} onChange={e=>setRecurForm(f=>({...f,day:e.target.value}))} style={{ ...S.inp, marginBottom:0 }}/></div>
+                </div>
+                <div style={{ marginTop:9 }}>
+                  <label style={S.lbl}>Catégorie</label>
+                  <select value={recurForm.category} onChange={e=>setRecurForm(f=>({...f,category:e.target.value}))} style={S.sel}>
+                    {(categories[recurForm.type]||[]).map(c=><option key={c}>{c}</option>)}
+                  </select>
+                </div>
+                <label style={S.lbl}>Début</label>
+                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:9 }}>
+                  <select value={recurForm.startMonth} onChange={e=>setRecurForm(f=>({...f,startMonth:parseInt(e.target.value)}))} style={{ ...S.sel, marginBottom:0 }}>
+                    {MONTHS_FR.map((m,i)=><option key={i} value={i}>{m}</option>)}
+                  </select>
+                  <input type="number" min="2020" max="2040" value={recurForm.startYear} onChange={e=>setRecurForm(f=>({...f,startYear:parseInt(e.target.value)}))} style={{ ...S.inp, marginBottom:0 }}/>
+                </div>
+                <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:9 }}>
+                  <input type="checkbox" checked={recurForm.hasEnd} onChange={e=>setRecurForm(f=>({...f,hasEnd:e.target.checked}))} id="hasEnd"/>
+                  <label htmlFor="hasEnd" style={{ fontSize:13, color:T.text, cursor:"pointer" }}>Définir une date de fin</label>
+                </div>
+                {recurForm.hasEnd && (<>
+                  <label style={S.lbl}>Fin</label>
+                  <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:9 }}>
+                    <select value={recurForm.endMonth} onChange={e=>setRecurForm(f=>({...f,endMonth:parseInt(e.target.value)}))} style={{ ...S.sel, marginBottom:0 }}>
+                      {MONTHS_FR.map((m,i)=><option key={i} value={i}>{m}</option>)}
+                    </select>
+                    <input type="number" min="2020" max="2040" value={recurForm.endYear} onChange={e=>setRecurForm(f=>({...f,endYear:parseInt(e.target.value)}))} style={{ ...S.inp, marginBottom:0 }}/>
                   </div>
                 </>)}
-
-                <button style={S.btn(T.accent, T.primary)} onClick={submitRecur}>
-                  ✅ {editRecurId ? "Mettre à jour" : "Ajouter la récurrence"}
+                <button style={S.btn(T.accent)} onClick={submitRecur} disabled={!recurForm.name.trim()||!recurForm.amount}>
+                  ✅ {editRecurId?"Mettre à jour":"Enregistrer"}
                 </button>
               </div>
             )}
-
             {recurring.length === 0
-              ? <div style={{ color:T.muted, textAlign:"center", padding:"30px 0", fontSize:13 }}>
-                  Aucune récurrence configurée.<br/>
-                  <span style={{ fontSize:12 }}>Loyer, abonnements, salaire…</span>
-                </div>
+              ? <div style={{ ...S.card, textAlign:"center", color:T.muted, padding:"28px 16px", fontSize:13 }}>Aucune récurrence.</div>
               : recurring.map(r => (
-                <div key={r.id} style={{ ...S.cf("0 0 8px"), display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
-                  <div style={{ flex:1, minWidth:0 }}>
-                    <div style={{ fontSize:14, fontWeight:700 }}>{r.name}</div>
-                    <div style={{ fontSize:11, color:T.muted }}>{r.category} · le {r.day} du mois</div>
-                    <div style={{ fontSize:11, color:T.accent, marginTop:3, fontWeight:600 }}>📅 {periodLabel(r)}</div>
-                  </div>
-                  <div style={{ display:"flex", alignItems:"center", gap:6, flexShrink:0, marginLeft:8, paddingTop:2 }}>
-                    <span style={{ fontWeight:800, color:r.type==="income"?T.income:T.expense, fontSize:14 }}>
-                      {r.type==="income"?"+":"−"}{fmt(r.amount)}
-                    </span>
-                    <button onClick={() => startEditRecur(r)} style={S.smBtn(T.primary)}>✏️</button>
-                    <button onClick={() => deleteRecur(r.id)} style={S.smBtn(T.expense)}>🗑</button>
+                <div key={r.id} style={S.card}>
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
+                    <div style={{ flex:1 }}>
+                      <div style={{ fontSize:13, fontWeight:700 }}>{r.name}</div>
+                      <div style={{ fontSize:11, color:T.muted }}>{r.category} · Jour {r.day}</div>
+                      <div style={{ fontSize:10, color:T.muted }}>{periodLabel(r)}</div>
+                    </div>
+                    <div style={{ textAlign:"right" }}>
+                      <div style={{ fontSize:14, fontWeight:700, color:r.type==="income"?T.income:T.expense, marginBottom:6 }}>
+                        {r.type==="income"?"+":"-"}{fmt(r.amount)}
+                      </div>
+                      <div style={{ display:"flex", gap:5 }}>
+                        <button onClick={()=>startEditRecur(r)} style={S.smBtn(T.primary)}>✏️</button>
+                        <button onClick={()=>deleteRecur(r.id)} style={S.smBtn(T.expense)}>🗑</button>
+                      </div>
+                    </div>
                   </div>
                 </div>
               ))
             }
           </>)}
 
-          {/* ────── CATÉGORIES ────── */}
+          {/* ─── CATÉGORIES ─── */}
           {manageTab === "categories" && (<>
-            <div style={S.cf("0 0 12px")}>
-              <div style={{ fontSize:13, fontWeight:700, marginBottom:10 }}>Nouvelle catégorie</div>
-              <div style={S.toggle}>
-                <button style={S.tab(newCatType==="expense")} onClick={() => setNewCatType("expense")}>Dépense</button>
-                <button style={S.tab(newCatType==="income")}  onClick={() => setNewCatType("income")}>Revenu</button>
-              </div>
-              <div style={{ display:"flex", gap:8, marginTop:4 }}>
-                <input placeholder="Nom de la catégorie" value={newCatName}
-                  onChange={e => setNewCatName(e.target.value)}
-                  onKeyDown={e => e.key === "Enter" && addCat()}
-                  style={{ ...S.inp, marginBottom:0, flex:1 }}/>
-                <button onClick={addCat} style={S.smBtn(T.accent, T.primary)}>Ajouter</button>
-              </div>
-            </div>
-
             {["expense","income"].map(type => (
-              <div key={type} style={S.cf("0 0 10px")}>
-                <div style={{ ...S.secTitle, marginBottom:12 }}>
-                  {type === "expense" ? "🔴 Dépenses" : "🟢 Revenus"}
-                  <span style={{ fontSize:9, background:T.muted+"22", color:T.muted, borderRadius:4, padding:"1px 6px", marginLeft:8, fontWeight:700 }}>
-                    {(categories[type] || []).length}
-                  </span>
-                </div>
-                {(categories[type] || []).map((cat, idx) => (
-                  <div key={cat + idx}>
-                    {editCat?.type === type && editCat?.idx === idx ? (
-                      <div style={{ display:"flex", gap:6, padding:"6px 0", borderBottom:`1px solid ${T.border}`, alignItems:"center" }}>
-                        <input autoFocus value={editCatVal} onChange={e => setEditCatVal(e.target.value)}
-                          onKeyDown={e => { if(e.key==="Enter")saveEditCat(); if(e.key==="Escape")setEditCat(null); }}
-                          style={{ ...S.inp, marginBottom:0, flex:1, padding:"6px 10px", fontSize:13 }}/>
-                        <button onClick={saveEditCat}          style={S.smBtn(T.income)}>✓</button>
-                        <button onClick={() => setEditCat(null)} style={S.smBtn(T.muted)}>✕</button>
+              <div key={type} style={{ marginBottom:14 }}>
+                <div style={{ ...S.sec, marginBottom:8 }}>{type==="expense"?"Dépenses":"Revenus"}</div>
+                {(categories[type]||[]).map(cat => (
+                  <div key={cat} style={{ ...S.card, padding:"8px 12px", margin:"0 0 6px" }}>
+                    {editCat===`${type}:${cat}` ? (
+                      <div style={{ display:"flex", gap:6 }}>
+                        <input value={editCatVal} onChange={e=>setEditCatVal(e.target.value)}
+                          onKeyDown={e=>e.key==="Enter"&&renameCategory(type,cat)}
+                          autoFocus style={{ ...S.inp, marginBottom:0, flex:1, padding:"6px 10px", fontSize:13 }}/>
+                        <button onClick={()=>renameCategory(type,cat)} style={S.smBtn(T.accent)}>✓</button>
+                        <button onClick={()=>setEditCat(null)} style={S.smBtn(T.muted)}>✕</button>
                       </div>
                     ) : (
-                      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"8px 0", borderBottom:`1px solid ${T.border}` }}>
-                        <span style={{ fontSize:13, fontWeight:500 }}>{cat}</span>
-                        <div style={{ display:"flex", gap:6 }}>
-                          <button onClick={() => startEditCat(type, idx)} style={S.smBtn(T.primary, undefined, true)}>✏️</button>
-                          <button onClick={() => deleteCat(type, idx)}    style={S.smBtn(T.expense, undefined, true)}>🗑</button>
+                      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                        <span style={{ fontSize:13 }}>{cat}</span>
+                        <div style={{ display:"flex", gap:5 }}>
+                          <button onClick={()=>{setEditCat(`${type}:${cat}`);setEditCatVal(cat);}} style={S.smBtn(T.primary)}>✏️</button>
+                          <button onClick={()=>deleteCategory(type,cat)} style={S.smBtn(T.expense)}>🗑</button>
                         </div>
                       </div>
                     )}
                   </div>
                 ))}
+                <div style={{ display:"flex", gap:8, marginTop:6 }}>
+                  <input placeholder={`Nouvelle catégorie (${type==="expense"?"dépense":"revenu"})`}
+                    value={newCatType===type?newCatName:""} 
+                    onChange={e=>{setNewCatName(e.target.value);setNewCatType(type);}}
+                    onKeyDown={e=>e.key==="Enter"&&newCatType===type&&addCategory()}
+                    style={{ ...S.inp, marginBottom:0, flex:1, fontSize:13, padding:"8px 10px" }}/>
+                  <button onClick={()=>{setNewCatType(type);addCategory();}} style={{ ...S.smBtn(T.accent), padding:"8px 12px" }}>+</button>
+                </div>
               </div>
             ))}
-
-            <button onClick={resetCats}
-              style={{ ...S.btn(T.surface, T.muted), border:`1px solid ${T.border}`, fontSize:12, fontWeight:600 }}>
-              🔄 Réinitialiser les catégories par défaut
-            </button>
-            <div style={{ fontSize:10, color:T.muted, textAlign:"center", marginTop:-4, marginBottom:8 }}>
-              Les mouvements existants ne sont pas modifiés.
-            </div>
           </>)}
+
+          {/* ─── PROJETS D'ÉPARGNE ─── */}
+          {manageTab === "projets" && (<>
+            <button onClick={() => { setProjForm(emptyProj); setEditProjId(null); setShowProjF(!showProjF); }}
+              style={S.btn(showProjF?T.muted:T.project)}>
+              {showProjF?"✕ Annuler":"🎯 Nouveau projet"}
+            </button>
+
+            {showProjF && (
+              <div style={{ ...S.cf("0 0 12px"), border:`1.5px solid ${T.project}` }}>
+                <div style={{ fontSize:13, fontWeight:800, marginBottom:12, color:T.project }}>{editProjId?"Modifier le projet":"Nouveau projet d'épargne"}</div>
+
+                {/* Emoji picker */}
+                <label style={S.lbl}>Icône</label>
+                <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginBottom:9 }}>
+                  {PROJECT_EMOJIS.map(e => (
+                    <button key={e} onClick={() => setProjForm(f=>({...f,emoji:e}))}
+                      style={{ width:36, height:36, borderRadius:8, border:`2px solid ${projForm.emoji===e?T.project:T.border}`,
+                        background:projForm.emoji===e?T.projectLight:T.bg, fontSize:18, cursor:"pointer",
+                        display:"flex", alignItems:"center", justifyContent:"center" }}>
+                      {e}
+                    </button>
+                  ))}
+                </div>
+
+                <label style={S.lbl}>Nom du projet</label>
+                <input placeholder="Ex : Voyage 2026" value={projForm.name} onChange={e=>setProjForm(f=>({...f,name:e.target.value}))} style={S.inp}/>
+
+                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
+                  <div>
+                    <label style={S.lbl}>Objectif (€)</label>
+                    <input type="number" min="0" step="1" placeholder="1000" value={projForm.targetAmount} onChange={e=>setProjForm(f=>({...f,targetAmount:e.target.value}))} style={{ ...S.inp, marginBottom:0 }}/>
+                  </div>
+                  <div>
+                    <label style={S.lbl}>Déjà épargné (€)</label>
+                    <input type="number" min="0" step="1" placeholder="0" value={projForm.savedAmount} onChange={e=>setProjForm(f=>({...f,savedAmount:e.target.value}))} style={{ ...S.inp, marginBottom:0 }}/>
+                  </div>
+                </div>
+
+                <div style={{ marginTop:9 }}>
+                  <label style={S.lbl}>Échéance (optionnel)</label>
+                  <input type="date" value={projForm.deadline} onChange={e=>setProjForm(f=>({...f,deadline:e.target.value}))} style={S.inp}/>
+                </div>
+
+                <label style={S.lbl}>Note (optionnel)</label>
+                <input placeholder="Ex : Hôtel 4 nuits + vols" value={projForm.note} onChange={e=>setProjForm(f=>({...f,note:e.target.value}))} style={S.inp}/>
+
+                <button style={S.btn(T.project)} onClick={submitProject} disabled={!projForm.name.trim()||!projForm.targetAmount}>
+                  ✅ {editProjId?"Mettre à jour":"Créer le projet"}
+                </button>
+              </div>
+            )}
+
+            {/* Allouer de l'épargne */}
+            {projects.length > 0 && (
+              <div style={{ ...S.cf("0 0 12px"), background:T.projectLight, border:`1px solid ${T.project}33` }}>
+                <div style={{ ...S.sec, marginBottom:8, color:T.project }}>Allouer une épargne</div>
+                <select value={projAllocForm.id} onChange={e=>setProjAllocForm(f=>({...f,id:e.target.value}))} style={{ ...S.sel, marginBottom:9 }}>
+                  <option value="">— Choisir un projet —</option>
+                  {projects.filter(p=>p.savedAmount<p.targetAmount).map(p=>(
+                    <option key={p.id} value={p.id}>{p.emoji} {p.name} ({fmt(p.targetAmount - p.savedAmount)} restants)</option>
+                  ))}
+                </select>
+                <div style={{ display:"flex", gap:8 }}>
+                  <input type="number" min="0" step="0.01" placeholder="Montant (€)" value={projAllocForm.amount}
+                    onChange={e=>setProjAllocForm(f=>({...f,amount:e.target.value}))}
+                    style={{ ...S.inp, marginBottom:0, flex:1 }}/>
+                  <button onClick={allocateToProject} disabled={!projAllocForm.id||!projAllocForm.amount}
+                    style={{ ...S.smBtn(T.project), padding:"9px 14px", fontSize:13, opacity:(!projAllocForm.id||!projAllocForm.amount)?.5:1 }}>
+                    Allouer
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Liste des projets */}
+            {projects.length === 0
+              ? <div style={{ ...S.card, textAlign:"center", color:T.muted, padding:"28px 16px", fontSize:13 }}>
+                  Aucun projet. Créez votre premier objectif d'épargne !
+                </div>
+              : projects.map(p => {
+                  const pct = p.targetAmount > 0 ? Math.min((p.savedAmount / p.targetAmount) * 100, 100) : 0;
+                  const days = p.deadline ? daysUntil(p.deadline) : null;
+                  const done = p.savedAmount >= p.targetAmount;
+                  return (
+                    <div key={p.id} style={{ ...S.card, border:`1px solid ${done?T.income:T.project}44`, opacity:done?.85:1 }}>
+                      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:8 }}>
+                        <div>
+                          <div style={{ fontSize:20, marginBottom:2 }}>{p.emoji}</div>
+                          <div style={{ fontSize:14, fontWeight:800 }}>{p.name}</div>
+                          {p.note && <div style={{ fontSize:11, color:T.muted, fontStyle:"italic" }}>{p.note}</div>}
+                        </div>
+                        <div style={{ display:"flex", gap:5 }}>
+                          <button onClick={()=>startEditProject(p)} style={S.smBtn(T.primary)}>✏️</button>
+                          <button onClick={()=>deleteProject(p.id)} style={S.smBtn(T.expense)}>🗑</button>
+                        </div>
+                      </div>
+                      <div style={{ display:"flex", justifyContent:"space-between", fontSize:13, marginBottom:4 }}>
+                        <span style={{ color:T.muted }}>Épargne</span>
+                        <span style={{ fontWeight:800, color:done?T.income:T.project }}>{fmt(p.savedAmount)} / {fmt(p.targetAmount)}</span>
+                      </div>
+                      <Bar pct={pct} color={done?T.income:T.project} h={8}/>
+                      <div style={{ display:"flex", justifyContent:"space-between", fontSize:10, marginTop:4 }}>
+                        <span style={{ color:T.muted }}>{pct.toFixed(0)}%</span>
+                        {done ? (
+                          <span style={{ color:T.income, fontWeight:700 }}>🎉 Objectif atteint !</span>
+                        ) : (
+                          <span style={{ color:T.muted }}>{fmt(p.targetAmount - p.savedAmount)} restants</span>
+                        )}
+                      </div>
+                      {days !== null && !done && (
+                        <div style={{ marginTop:6, fontSize:11, color:days<30?T.expense:T.muted,
+                          background:days<30?T.expenseLight:T.bg, padding:"4px 8px", borderRadius:6 }}>
+                          ⏱ Échéance : {fmtD(p.deadline)}
+                          {days >= 0 ? ` (dans ${days} jour${days>1?"s":""})` : " — Dépassée !"}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
+            }
+          </>)}
+
+          {/* ─── IMPORT CSV ─── */}
+          {manageTab === "import" && (
+            <div>
+              <div style={{ fontSize:13, color:T.muted, marginBottom:12, lineHeight:1.6 }}>
+                Importez un fichier CSV exporté depuis Prism Finance.<br/>
+                Format accepté : <strong>Date;Type;Catégorie;Description;Montant (€);Récurrent</strong><br/>
+                Séparateur <code>;</code> ou <code>,</code> · Date DD/MM/YYYY ou YYYY-MM-DD.
+              </div>
+              <input type="file" accept=".csv,.txt" ref={fileRef} onChange={handleImport} style={{ display:"none" }}/>
+              <button style={S.btn(T.primary)} onClick={() => fileRef.current?.click()}>📂 Importer un fichier CSV</button>
+              {importMsg && (
+                <div style={{ padding:"10px 14px", borderRadius:10, fontSize:13, marginBottom:10,
+                  background: importMsg.startsWith("✅")?T.incomeLight:T.expenseLight,
+                  color: importMsg.startsWith("✅")?T.income:T.expense }}>
+                  {importMsg}
+                </div>
+              )}
+              <div style={{ borderTop:`1px solid ${T.border}`, paddingTop:12, marginTop:4 }}>
+                <div style={{ ...S.sec, marginBottom:8 }}>Exporter</div>
+                <button style={S.btn(T.accent)} onClick={() => exportCSV(transactions)}>
+                  ⬇ Exporter toutes les transactions (CSV)
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
       {/* ════ BOTTOM NAV ════ */}
       <div style={S.nav}>
-        <Nav icon="🏠" label="Accueil"  target="dashboard"/>
-        <Nav icon="＋" label="Ajouter"  target="add"/>
-        <Nav icon="📋" label="Journal"  target="history"/>
-        <Nav icon="📊" label="Stats"    target="stats"/>
-        <Nav icon="⚙️" label="Gérer"    target="manage"/>
+        <Nav icon="🏠" label="Accueil"   target="dashboard"/>
+        <Nav icon="📋" label="Mouvements" target="transactions"/>
+        <Nav icon="📈" label="Projection" target="projection"/>
+        <Nav icon="⚙️" label="Gérer"     target="manage"/>
       </div>
     </div>
   );
